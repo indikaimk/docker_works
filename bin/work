@@ -1,0 +1,50 @@
+#!/usr/bin/env ruby
+
+# --- Setup for running the gem locally ---
+# Add the 'lib' directory to the load path
+$LOAD_PATH.unshift File.expand_path('../../lib', __FILE__)
+require 'docker_works'
+
+# --- Configuration ---
+WORKFLOW_FILE = 'workflow.rb'
+
+# --- Main Execution ---
+
+# 1. Check for command-line argument
+unless ARGV.length == 1
+  puts "Usage: #{$0} <task_name>"
+  puts "Available tasks: [build_and_push, deploy]"
+  exit 1
+end
+
+task_name = ARGV[0].to_sym
+
+# 2. Check if the workflow file exists
+unless File.exist?(WORKFLOW_FILE)
+  puts "Error: Workflow file not found at '#{WORKFLOW_FILE}'"
+  exit 1
+end
+
+begin
+  # 3. Load the DSL definition from Workflow.rb
+  puts "Loading workflow definition from #{WORKFLOW_FILE}..."
+  dsl_config = DockerWorks::DSL.load(WORKFLOW_FILE)
+  
+  # 4. Check if the requested task exists
+  unless dsl_config.tasks.key?(task_name)
+    puts "Error: Task '#{task_name}' is not defined in #{WORKFLOW_FILE}"
+    puts "Available tasks: #{dsl_config.tasks.keys.join(', ')}"
+    exit 1
+  end
+
+  # 5. Initialize the executor and run the task
+  executor = DockerWorks::Runner.new(dsl_config)
+  puts "--- Initializing multi-host execution via SSHKit ---"
+  executor.execute_task(task_name)
+
+rescue StandardError => e
+  puts "\n!!! CRITICAL ERROR DURING WORKFLOW EXECUTION !!!"
+  puts "#{e.class}: #{e.message}"
+  puts e.backtrace.join("\n") if ENV['DEBUG']
+  exit 1
+end
