@@ -1,0 +1,25 @@
+[Unit]
+Description=DockerWorks - GitOps & Auto-Update Daemon for Docker Compose
+Documentation=https://github.com/indikaimk/docker_works
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/docker-works daemon --config /etc/docker-works/config.yaml
+Restart=always
+RestartSec=5s
+
+# Process management & limits
+LimitNOFILE=65536
+TimeoutStopSec=30s
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=docker-works
+
+[Install]
+WantedBy=multi-user.target

@@ -1,8 +1,16 @@
-/.bundle/
-/.yardoc
-/_yardoc/
-/coverage/
-/doc/
-/pkg/
-/spec/reports/
-/tmp/
+# Binaries
+bin/
+/docker-works
+
+# Environment and secrets
+*.env
+*.local
+
+# State and logs
+data/
+*.log
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/

@@ -1,0 +1,52 @@
+# DockerWorks Example Configuration
+
+server:
+  enabled: true
+  listen: "127.0.0.1:8080"      # Listen address for webhook & health endpoints
+  webhook_secret: "secret-token" # Default webhook secret across apps
+
+defaults:
+  git_poll_interval: "2m"       # Default interval to check for git repo updates
+  registry_poll_interval: "5m"  # Default interval to check container registries
+  compose_command: "docker compose"
+  state_dir: "/var/lib/docker-works"
+  health_check_timeout: "60s"
+
+apps:
+  # App 1: GitOps mode - Clones and monitors a GitHub repo for compose updates
+  - name: "my-web-service"
+    work_dir: "/var/lib/docker-works/apps/my-web-service"
+    compose_files:
+      - "docker-compose.yml"
+    env_files:
+      - "/etc/docker-works/secrets/my-web-service.env"
+    git:
+      repo: "https://github.com/myorg/infra.git" # or git@github.com:myorg/infra.git
+      branch: "main"
+      path: "services/web"                       # Subdirectory inside the repo containing compose file
+      poll_interval: "1m"
+      auth:
+        token: "${GITHUB_TOKEN}"                 # Env var expansion supported
+        # ssh_key_path: "/root/.ssh/id_ed25519"  # For private repos via SSH
+    hooks:
+      pre_deploy: "echo 'Starting deployment for web service...'"
+      post_deploy: "docker compose exec -T web ./db-migrate.sh"
+    auto_prune: true                             # Prunes dangling docker images after update
+
+  # App 2: Registry Watcher mode - Restarts compose when new images are pushed
+  - name: "my-api"
+    work_dir: "/opt/apps/my-api"
+    compose_files:
+      - "docker-compose.yml"
+      - "docker-compose.prod.yml"
+    registry:
+      watch_images:
+        - "ghcr.io/myorg/api:latest"
+        - "redis:alpine"
+      poll_interval: "3m"
+      auth:
+        ghcr.io:
+          token: "${GHCR_TOKEN}"
+    webhook:
+      secret: "custom-app-secret"                # POST /webhooks/my-api
+    auto_prune: true
