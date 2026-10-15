@@ -13,14 +13,31 @@ BIN_DIR="/usr/local/bin"
 CONFIG_DIR="/etc/docker-works"
 STATE_DIR="/var/lib/docker-works"
 SYSTEMD_DIR="/etc/systemd/system"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-echo "1. Building binary..."
+echo "1. Checking Docker & Compose prerequisites..."
+if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>&1; then
+  echo "   Docker or Docker Compose plugin not found on this host."
+  if [ -f "${SCRIPT_DIR}/setup-docker.sh" ]; then
+    echo "   Running automated Docker setup for host..."
+    bash "${SCRIPT_DIR}/setup-docker.sh"
+  else
+    echo "   Error: ${SCRIPT_DIR}/setup-docker.sh not found. Please install Docker manually."
+    exit 1
+  fi
+else
+  echo "   Docker and Docker Compose are already present:"
+  echo "   - $(docker --version)"
+  echo "   - $(docker compose version)"
+fi
+
+echo "2. Building binary..."
 go build -ldflags="-s -w" -o /tmp/docker-works ./cmd/docker-works
 mv /tmp/docker-works "${BIN_DIR}/docker-works"
 chmod +x "${BIN_DIR}/docker-works"
 echo "   Installed ${BIN_DIR}/docker-works"
 
-echo "2. Setting up directories..."
+echo "3. Setting up directories..."
 mkdir -p "${CONFIG_DIR}"
 mkdir -p "${STATE_DIR}/apps"
 
@@ -29,7 +46,7 @@ if [ ! -f "${CONFIG_DIR}/config.yaml" ]; then
   cp examples/config.example.yaml "${CONFIG_DIR}/config.yaml"
 fi
 
-echo "3. Installing systemd unit..."
+echo "4. Installing systemd unit..."
 cp packaging/systemd/docker-works.service "${SYSTEMD_DIR}/docker-works.service"
 systemctl daemon-reload
 

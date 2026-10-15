@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"os/signal"
+	"runtime"
+	"strings"
 	"syscall"
 
 	"github.com/indikaimk/docker_works/internal/compose"
@@ -37,6 +40,8 @@ func main() {
 		runSync(os.Args[2:])
 	case "validate":
 		runValidate(os.Args[2:])
+	case "doctor":
+		runDoctor(os.Args[2:])
 	case "version":
 		fmt.Printf("DockerWorks version %s (%s, %s)\n", Version, GitCommit, BuildDate)
 	case "help", "-h", "--help":
@@ -58,6 +63,7 @@ Commands:
   daemon     Run the background watcher and webhook service
   sync       Perform an immediate sync and deployment
   validate   Validate a configuration file
+  doctor     Inspect host environment, Docker, and Compose installation
   version    Show version information
   help       Show this help message
 
@@ -186,6 +192,80 @@ func runValidate(args []string) {
 			watchers = append(watchers, fmt.Sprintf("registry: %d images", len(app.Registry.WatchImages)))
 		}
 		fmt.Printf("  - %s (work_dir: %s, watchers: %v)\n", app.Name, app.WorkDir, watchers)
+	}
+}
+
+func runDoctor(args []string) {
+	fs := flag.NewFlagSet("doctor", flag.ExitOnError)
+	configPath := fs.String("config", "", "Path to configuration file")
+	_ = fs.Parse(args)
+
+	fmt.Println("DockerWorks Environment Check (Doctor)")
+	fmt.Println("======================================")
+
+	allPass := true
+
+	// 1. OS & Architecture
+	fmt.Printf("[✓] OS / Architecture: %s / %s\n", runtime.GOOS, runtime.GOARCH)
+
+	// 2. Git CLI
+	gitOut, err := exec.Command("git", "--version").Output()
+	if err == nil {
+		fmt.Printf("[✓] Git CLI:           %s", string(gitOut))
+	} else {
+		fmt.Println("[✗] Git CLI:           Not found on PATH")
+		allPass = false
+	}
+
+	// 3. Docker CLI
+	dockerOut, err := exec.Command("docker", "--version").Output()
+	if err == nil {
+		fmt.Printf("[✓] Docker CLI:        %s", string(dockerOut))
+	} else {
+		fmt.Println("[✗] Docker CLI:        Not found on PATH")
+		fmt.Println("    -> Install Docker using: sudo ./scripts/setup-docker.sh (Ubuntu, Debian, Fedora)")
+		allPass = false
+	}
+
+	// 4. Docker Compose Plugin
+	composeOut, err := exec.Command("docker", "compose", "version").Output()
+	if err == nil {
+		fmt.Printf("[✓] Docker Compose:    %s", string(composeOut))
+	} else {
+		fmt.Println("[✗] Docker Compose:    'docker compose' plugin not found")
+		fmt.Println("    -> Install Compose using: sudo ./scripts/setup-docker.sh (Ubuntu, Debian, Fedora)")
+		allPass = false
+	}
+
+	// 5. Docker Daemon Socket Connectivity
+	infoOut, err := exec.Command("docker", "info", "--format", "{{.ServerVersion}}").Output()
+	if err == nil {
+		fmt.Printf("[✓] Docker Daemon:     Connected (Server Version %s)\n", strings.TrimSpace(string(infoOut)))
+	} else {
+		fmt.Println("[!] Docker Daemon:     Cannot communicate with Docker daemon socket (/var/run/docker.sock)")
+		fmt.Println("    -> If service is stopped, run: sudo systemctl enable --now docker")
+		fmt.Println("    -> If permission denied, add user to group: sudo usermod -aG docker $USER")
+	}
+
+	// 6. Configuration Check
+	resolvedPath := findDefaultConfig(*configPath)
+	if _, err := os.Stat(resolvedPath); err == nil {
+		cfg, err := config.Load(resolvedPath)
+		if err == nil {
+			fmt.Printf("[✓] Configuration:     Valid (%s, %d apps configured)\n", resolvedPath, len(cfg.Apps))
+		} else {
+			fmt.Printf("[✗] Configuration:     Invalid syntax in %s: %v\n", resolvedPath, err)
+			allPass = false
+		}
+	} else {
+		fmt.Printf("[-] Configuration:     No config file found at %s (run validate once created)\n", resolvedPath)
+	}
+
+	fmt.Println("======================================")
+	if allPass {
+		fmt.Println("Status: Host environment is ready for DockerWorks.")
+	} else {
+		fmt.Println("Status: Some requirements are missing. Review items marked with [✗].")
 	}
 }
 

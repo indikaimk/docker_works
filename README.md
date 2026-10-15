@@ -84,6 +84,14 @@ cd docker_works
 sudo ./scripts/install.sh
 ```
 
+> [!NOTE]
+> `install.sh` automatically checks for Docker and Docker Compose on the host. If missing, it invokes `scripts/setup-docker.sh` to install Docker CE, the Docker Compose plugin, and start the systemd service on **Ubuntu**, **Debian**, and **Fedora**.
+>
+> You can also run the Docker setup script standalone:
+> ```bash
+> sudo ./scripts/setup-docker.sh
+> ```
+
 Or build manually:
 ```bash
 go build -o /usr/local/bin/docker-works ./cmd/docker-works
@@ -136,6 +144,9 @@ apps:
 ### 3. Verify & Start
 
 ```bash
+# Check host environment and requirements
+docker-works doctor --config /etc/docker-works/config.yaml
+
 # Validate configuration file
 docker-works validate --config /etc/docker-works/config.yaml
 
@@ -154,6 +165,7 @@ journalctl -u docker-works -f
 | :--- | :--- | :--- |
 | `daemon` | Runs background watchers and webhook server | `docker-works daemon --config /etc/docker-works/config.yaml` |
 | `sync` | Manually syncs and deploys an app immediately | `docker-works sync --config /etc/docker-works/config.yaml --app my-app` |
+| `doctor` | Checks host environment, Docker, Compose, and config | `docker-works doctor --config /etc/docker-works/config.yaml` |
 | `validate` | Validates configuration file syntax and app definitions | `docker-works validate --config config.yaml` |
 | `version` | Displays version and build metadata | `docker-works version` |
 
