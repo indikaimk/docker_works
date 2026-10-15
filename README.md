@@ -15,14 +15,18 @@ A lightweight, zero-dependency GitOps and auto-update daemon for **Docker Compos
   - Monitors image tags (`latest`, semver tags) on container registries (Docker Hub, GitHub Packages GHCR, AWS ECR, private registries).
   - Inspects remote manifest digests (SHA256) using fast `HEAD`/`GET` requests without pulling gigabytes of image layers.
   - Automatically triggers compose pull and redeployment when an image digest changes.
+- **🛡️ Automated Rollback & Health Checks**:
+  - Automatically queries container health (`docker compose ps --format json`) post-deployment.
+  - If any container crashes or fails its healthcheck within `health_check_timeout`, DockerWorks initiates an immediate rollback to the previous working git commit and container state.
+  - Built-in flapping/loop prevention skips known failing commits until a new commit is pushed.
 - **⚡ Webhook & Health Endpoints**:
   - Optional built-in HTTP server (`/webhooks/{app}`).
   - Validates GitHub HMAC-SHA256 signatures (`X-Hub-Signature-256`), GitLab secret tokens, and bearer tokens for immediate push-triggered deployments.
   - Health check endpoint at `/healthz`.
-- **🛠️ Lifecycle Hooks**:
-  - Custom shell commands before deployment (`pre_deploy`) and after deployment (`post_deploy` e.g., running database migrations).
+- **🛠️ Lifecycle & Rollback Hooks**:
+  - Custom shell commands before deployment (`pre_deploy`), after successful deployment (`post_deploy` e.g., running database migrations), and on rollback events (`on_rollback`).
 - **🧹 Auto Prune**:
-  - Automatically cleans up orphaned images with `docker image prune -f` after successful updates.
+  - Automatically cleans up orphaned images with `docker image prune -f` only after successful deployments.
 - **🐧 Systemd Daemon**:
   - Single static binary, low memory footprint (~15-30 MB), logs directly to `journald`.
 

@@ -11,6 +11,7 @@ defaults:
   compose_command: "docker compose"
   state_dir: "/var/lib/docker-works"
   health_check_timeout: "60s"
+  auto_rollback: true           # Automatically roll back if containers fail health checks
 
 apps:
   # App 1: GitOps mode - Clones and monitors a GitHub repo for compose updates
@@ -31,7 +32,9 @@ apps:
     hooks:
       pre_deploy: "echo 'Starting deployment for web service...'"
       post_deploy: "docker compose exec -T web ./db-migrate.sh"
-    auto_prune: true                             # Prunes dangling docker images after update
+      on_rollback: "echo 'Deployment failed healthcheck, rolled back to previous commit'"
+    auto_rollback: true                          # Roll back to previous commit on failure
+    auto_prune: true                             # Prunes dangling docker images after successful update
 
   # App 2: Registry Watcher mode - Restarts compose when new images are pushed
   - name: "my-api"

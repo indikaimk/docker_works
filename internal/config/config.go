@@ -28,6 +28,14 @@ type DefaultsConfig struct {
 	ComposeCommand       string        `yaml:"compose_command"`
 	StateDir             string        `yaml:"state_dir"`
 	HealthCheckTimeout   time.Duration `yaml:"health_check_timeout"`
+	AutoRollback         *bool         `yaml:"auto_rollback"`
+}
+
+func (d *DefaultsConfig) IsAutoRollbackEnabled() bool {
+	if d.AutoRollback == nil {
+		return true
+	}
+	return *d.AutoRollback
 }
 
 type AppConfig struct {
@@ -42,6 +50,7 @@ type AppConfig struct {
 	Hooks              HooksConfig     `yaml:"hooks"`
 	AutoPrune          bool            `yaml:"auto_prune"`
 	HealthCheckTimeout time.Duration   `yaml:"health_check_timeout"`
+	AutoRollback       *bool           `yaml:"auto_rollback"`
 }
 
 func (a *AppConfig) IsEnabled() bool {
@@ -49,6 +58,13 @@ func (a *AppConfig) IsEnabled() bool {
 		return true
 	}
 	return *a.Enabled
+}
+
+func (a *AppConfig) IsAutoRollbackEnabled(defaultVal bool) bool {
+	if a.AutoRollback != nil {
+		return *a.AutoRollback
+	}
+	return defaultVal
 }
 
 type GitConfig struct {
@@ -85,6 +101,7 @@ type WebhookConfig struct {
 type HooksConfig struct {
 	PreDeploy  string `yaml:"pre_deploy"`
 	PostDeploy string `yaml:"post_deploy"`
+	OnRollback string `yaml:"on_rollback"`
 }
 
 // Load reads and parses a YAML configuration file with environment variable expansion.
@@ -130,6 +147,10 @@ func (c *Config) applyDefaults(configDir string) {
 	if c.Defaults.HealthCheckTimeout <= 0 {
 		c.Defaults.HealthCheckTimeout = 60 * time.Second
 	}
+	if c.Defaults.AutoRollback == nil {
+		defaultRollback := true
+		c.Defaults.AutoRollback = &defaultRollback
+	}
 
 	for i := range c.Apps {
 		app := &c.Apps[i]
@@ -146,6 +167,10 @@ func (c *Config) applyDefaults(configDir string) {
 
 		if app.HealthCheckTimeout <= 0 {
 			app.HealthCheckTimeout = c.Defaults.HealthCheckTimeout
+		}
+
+		if app.AutoRollback == nil {
+			app.AutoRollback = c.Defaults.AutoRollback
 		}
 
 		if app.Git != nil {

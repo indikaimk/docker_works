@@ -158,3 +158,25 @@ func (s *Syncer) Sync(ctx context.Context, targetDir string, gitCfg *config.GitC
 
 	return s.GetLocalHeadCommit(ctx, targetDir)
 }
+
+// Rollback resets the local repository to the target commit SHA and cleans untracked files.
+func (s *Syncer) Rollback(ctx context.Context, targetDir string, gitCfg *config.GitConfig, targetCommit string) error {
+	if strings.TrimSpace(targetCommit) == "" {
+		return fmt.Errorf("cannot rollback: target commit is empty")
+	}
+
+	env, _, err := buildGitEnv(&gitCfg.Auth)
+	if err != nil {
+		return err
+	}
+
+	s.logger.Warn("Rolling back local git repository", "dir", targetDir, "target_commit", targetCommit)
+
+	_, err = s.runner.Run(ctx, targetDir, env, "git", "reset", "--hard", targetCommit)
+	if err != nil {
+		return fmt.Errorf("git reset --hard failed: %w", err)
+	}
+
+	_, _ = s.runner.Run(ctx, targetDir, env, "git", "clean", "-fd")
+	return nil
+}

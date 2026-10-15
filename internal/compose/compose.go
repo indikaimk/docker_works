@@ -3,11 +3,13 @@ package compose
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/indikaimk/docker_works/internal/config"
 )
@@ -65,6 +67,136 @@ func NewService(runner CommandRunner, logger *slog.Logger) *Service {
 	}
 }
 
+// ContainerStatus represents the JSON structure output by `docker compose ps --format json`
+type ContainerStatus struct {
+	ID       string `json:"ID"`
+	Name     string `json:"Name"`
+	Service  string `json:"Service"`
+	State    string `json:"State"`  // "running", "exited", "dead", "restarting", "created"
+	Health   string `json:"Health"` // "healthy", "unhealthy", "starting", or ""
+	ExitCode int    `json:"ExitCode"`
+	Status   string `json:"Status"`
+}
+
+// ParseContainerStatuses parses docker compose ps --format json output.
+func ParseContainerStatuses(raw string) ([]ContainerStatus, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil, nil
+	}
+
+	// Try JSON array first
+	if strings.HasPrefix(trimmed, "[") {
+		var list []ContainerStatus
+		if err := json.Unmarshal([]byte(trimmed), &list); err == nil {
+			return list, nil
+		}
+	}
+
+	// Try newline-delimited JSON
+	var list []ContainerStatus
+	lines := strings.Split(trimmed, "\n")
+	hasValid := false
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var item ContainerStatus
+		if err := json.Unmarshal([]byte(line), &item); err == nil {
+			list = append(list, item)
+			hasValid = true
+		}
+	}
+
+	if hasValid {
+		return list, nil
+	}
+
+	return nil, fmt.Errorf("unable to parse output as container status JSON")
+}
+
+// HealthEvaluation represents the evaluation of containers
+type HealthEvaluation struct {
+	AllHealthy    bool
+	Failed        bool
+	FailureReason string
+	StartingCount int
+}
+
+func EvaluateStatuses(statuses []ContainerStatus) HealthEvaluation {
+	if len(statuses) == 0 {
+		return HealthEvaluation{
+			AllHealthy:    false,
+			Failed:        false,
+			FailureReason: "no containers found running",
+		}
+	}
+
+	startingCount := 0
+	runningCount := 0
+
+	for _, s := range statuses {
+		// 1. Explicit unhealthy
+		if strings.EqualFold(s.Health, "unhealthy") {
+			return HealthEvaluation{
+				AllHealthy:    false,
+				Failed:        true,
+				FailureReason: fmt.Sprintf("service '%s' (container %s) is unhealthy", s.Service, s.Name),
+			}
+		}
+
+		// 2. Dead or exited with non-zero code
+		if strings.EqualFold(s.State, "dead") {
+			return HealthEvaluation{
+				AllHealthy:    false,
+				Failed:        true,
+				FailureReason: fmt.Sprintf("service '%s' (container %s) is dead", s.Service, s.Name),
+			}
+		}
+
+		if strings.EqualFold(s.State, "exited") && s.ExitCode != 0 {
+			return HealthEvaluation{
+				AllHealthy:    false,
+				Failed:        true,
+				FailureReason: fmt.Sprintf("service '%s' (container %s) exited with error code %d", s.Service, s.Name, s.ExitCode),
+			}
+		}
+
+		// 3. Health check still running
+		if strings.EqualFold(s.Health, "starting") {
+			startingCount++
+			continue
+		}
+
+		// 4. Running container
+		if strings.EqualFold(s.State, "running") {
+			runningCount++
+		}
+	}
+
+	if startingCount > 0 {
+		return HealthEvaluation{
+			AllHealthy:    false,
+			Failed:        false,
+			StartingCount: startingCount,
+		}
+	}
+
+	if runningCount > 0 {
+		return HealthEvaluation{
+			AllHealthy: true,
+			Failed:     false,
+		}
+	}
+
+	return HealthEvaluation{
+		AllHealthy:    false,
+		Failed:        false,
+		FailureReason: "containers are not yet in running state",
+	}
+}
+
 // buildComposeArgs returns the base arguments for docker compose: -f file.yml --env-file .env ...
 func buildComposeArgs(composeFiles []string, envFiles []string, subCmd string, extraArgs ...string) []string {
 	var args []string
@@ -118,6 +250,64 @@ func (s *Service) Prune(ctx context.Context) (string, error) {
 	return s.runner.Run(ctx, "", nil, "docker", "image", "prune", "-f")
 }
 
+func (s *Service) WaitForHealth(ctx context.Context, app *config.AppConfig, composeCmd string, timeout time.Duration) error {
+	if timeout <= 0 {
+		timeout = 60 * time.Second
+	}
+
+	s.logger.Info("Waiting for containers to report healthy", "app", app.Name, "timeout", timeout)
+
+	pollInterval := 2 * time.Second
+	if timeout < 5*time.Second {
+		pollInterval = 50 * time.Millisecond
+	}
+
+	deadline := time.Now().Add(timeout)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		if time.Now().After(deadline) {
+			return fmt.Errorf("health check timed out after %v", timeout)
+		}
+
+		out, err := s.executeCompose(ctx, app, composeCmd, "ps", "--format", "json")
+		if err != nil {
+			s.logger.Debug("Failed to query ps --format json, will retry", "app", app.Name, "error", err)
+		} else {
+			statuses, parseErr := ParseContainerStatuses(out)
+			if parseErr != nil {
+				lowerOut := strings.ToLower(out)
+				if strings.Contains(lowerOut, "unhealthy") {
+					return fmt.Errorf("container reported unhealthy: %s", strings.TrimSpace(out))
+				}
+				if strings.Contains(lowerOut, "healthy") || strings.Contains(lowerOut, "ok") {
+					return nil
+				}
+			} else {
+				eval := EvaluateStatuses(statuses)
+				if eval.Failed {
+					return fmt.Errorf("health check failed: %s", eval.FailureReason)
+				}
+				if eval.AllHealthy {
+					s.logger.Info("All services reported healthy/running", "app", app.Name)
+					return nil
+				}
+			}
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(pollInterval):
+		}
+	}
+}
+
 func (s *Service) RunHook(ctx context.Context, hookCmd string, dir string, appName string) error {
 	if strings.TrimSpace(hookCmd) == "" {
 		return nil
@@ -130,6 +320,33 @@ func (s *Service) RunHook(ctx context.Context, hookCmd string, dir string, appNa
 		return fmt.Errorf("hook failed: %w", err)
 	}
 	s.logger.Debug("Hook output", "app", appName, "output", output)
+	return nil
+}
+
+// Rollback restores containers to previous state using on_rollback hook and docker compose up.
+func (s *Service) Rollback(ctx context.Context, app *config.AppConfig, composeCmd string) error {
+	s.logger.Warn("Executing compose rollback for app", "app", app.Name, "work_dir", app.WorkDir)
+
+	// 1. Run on_rollback hook if configured
+	if app.Hooks.OnRollback != "" {
+		if err := s.RunHook(ctx, app.Hooks.OnRollback, app.WorkDir, app.Name); err != nil {
+			s.logger.Warn("on_rollback hook returned error", "app", app.Name, "error", err)
+		}
+	}
+
+	// 2. Restart containers with previous configuration
+	s.logger.Info("Restoring containers to previous state", "app", app.Name)
+	if out, err := s.Up(ctx, app, composeCmd); err != nil {
+		return fmt.Errorf("failed to restart containers during rollback: %w, output: %s", err, out)
+	}
+
+	// 3. Verify health of rolled-back containers
+	if err := s.WaitForHealth(ctx, app, composeCmd, app.HealthCheckTimeout); err != nil {
+		s.logger.Warn("Health check failed on rolled-back containers", "app", app.Name, "error", err)
+		return fmt.Errorf("rolled-back containers failed health check: %w", err)
+	}
+
+	s.logger.Info("Rollback deployment completed and healthy", "app", app.Name)
 	return nil
 }
 
@@ -161,19 +378,19 @@ func (s *Service) Deploy(ctx context.Context, app *config.AppConfig, composeCmd 
 		return fmt.Errorf("failed to start containers: %w, output: %s", err, out)
 	}
 
-	// 4. Verify status
-	if statusOut, err := s.Status(ctx, app, composeCmd); err == nil {
-		s.logger.Info("Container status after deployment", "app", app.Name, "status", strings.TrimSpace(statusOut))
+	// 4. Verify health check
+	if err := s.WaitForHealth(ctx, app, composeCmd, app.HealthCheckTimeout); err != nil {
+		return fmt.Errorf("health check failed: %w", err)
 	}
 
-	// 5. Post-deploy hook
+	// 5. Post-deploy hook (only reached if deployment and health check succeed!)
 	if app.Hooks.PostDeploy != "" {
 		if err := s.RunHook(ctx, app.Hooks.PostDeploy, app.WorkDir, app.Name); err != nil {
 			return fmt.Errorf("post-deploy hook failed: %w", err)
 		}
 	}
 
-	// 6. Optional auto prune
+	// 6. Optional auto prune (only reached if healthy!)
 	if app.AutoPrune {
 		s.logger.Info("Pruning unused docker images", "app", app.Name)
 		if _, err := s.Prune(ctx); err != nil {

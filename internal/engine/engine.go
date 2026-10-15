@@ -18,9 +18,18 @@ import (
 )
 
 type AppState struct {
-	LastGitCommit string            `json:"last_git_commit"`
-	ImageDigests  map[string]string `json:"image_digests"`
-	LastDeployed  time.Time         `json:"last_deployed"`
+	LastGitCommit     string            `json:"last_git_commit"`
+	LastFailedCommit  string            `json:"last_failed_commit,omitempty"`
+	ImageDigests      map[string]string `json:"image_digests"`
+	LastFailedDigests map[string]string `json:"last_failed_digests,omitempty"`
+	LastDeployed      time.Time         `json:"last_deployed"`
+	LastRollback      *RollbackEvent    `json:"last_rollback,omitempty"`
+}
+
+type RollbackEvent struct {
+	Timestamp time.Time `json:"timestamp"`
+	Reason    string    `json:"reason"`
+	Target    string    `json:"target"`
 }
 
 type EngineState struct {
@@ -116,17 +125,21 @@ func (e *Engine) getAppState(appName string) *AppState {
 	appState, ok := e.state.Apps[appName]
 	if !ok {
 		appState = &AppState{
-			ImageDigests: make(map[string]string),
+			ImageDigests:      make(map[string]string),
+			LastFailedDigests: make(map[string]string),
 		}
 		e.state.Apps[appName] = appState
 	}
 	if appState.ImageDigests == nil {
 		appState.ImageDigests = make(map[string]string)
 	}
+	if appState.LastFailedDigests == nil {
+		appState.LastFailedDigests = make(map[string]string)
+	}
 	return appState
 }
 
-// CheckAndDeployGit checks if git commit changed, updates local repo, and deploys.
+// CheckAndDeployGit checks if git commit changed, updates local repo, deploys, and automatically rolls back if health checks fail.
 func (e *Engine) CheckAndDeployGit(ctx context.Context, app *config.AppConfig) (bool, error) {
 	if app.Git == nil {
 		return false, nil
@@ -148,12 +161,18 @@ func (e *Engine) CheckAndDeployGit(ctx context.Context, app *config.AppConfig) (
 		return false, nil
 	}
 
+	if appState.LastFailedCommit == remoteCommit {
+		e.logger.Debug("Skipping commit that previously failed health check", "app", app.Name, "commit", remoteCommit)
+		return false, nil
+	}
+
 	e.logger.Info("New Git commit detected", "app", app.Name, "old", appState.LastGitCommit, "new", remoteCommit)
 
-	// Sync local repository
+	previousCommit := appState.LastGitCommit
+
+	// Target directory for git clone/checkout
 	targetRepoDir := app.WorkDir
 	if app.Git.Path != "" && app.Git.Path != "." {
-		// If Compose file is in a subdirectory, the clone target is the root repo dir
 		targetRepoDir = filepath.Dir(app.WorkDir)
 	}
 
@@ -162,22 +181,54 @@ func (e *Engine) CheckAndDeployGit(ctx context.Context, app *config.AppConfig) (
 		return false, fmt.Errorf("failed to sync repo for %s: %w", app.Name, err)
 	}
 
-	// Deploy compose
-	if err := e.composeService.Deploy(ctx, app, e.cfg.Defaults.ComposeCommand); err != nil {
-		return false, fmt.Errorf("compose deployment failed after git update: %w", err)
+	// Deploy and verify health
+	deployErr := e.composeService.Deploy(ctx, app, e.cfg.Defaults.ComposeCommand)
+	if deployErr != nil {
+		appState.LastFailedCommit = remoteCommit
+
+		autoRollback := app.IsAutoRollbackEnabled(e.cfg.Defaults.IsAutoRollbackEnabled())
+		if autoRollback && previousCommit != "" {
+			e.logger.Error("Deployment failed health checks; triggering automated rollback", "app", app.Name, "failed_commit", remoteCommit, "rollback_commit", previousCommit, "error", deployErr)
+
+			if rbGitErr := e.gitSyncer.Rollback(ctx, targetRepoDir, app.Git, previousCommit); rbGitErr != nil {
+				e.logger.Error("Failed to reset git repository to previous commit during rollback", "app", app.Name, "error", rbGitErr)
+				e.saveState()
+				return false, fmt.Errorf("deploy failed (%v) and git rollback failed: %w", deployErr, rbGitErr)
+			}
+
+			if rbComposeErr := e.composeService.Rollback(ctx, app, e.cfg.Defaults.ComposeCommand); rbComposeErr != nil {
+				e.logger.Error("Failed to restart containers during rollback", "app", app.Name, "error", rbComposeErr)
+				e.saveState()
+				return false, fmt.Errorf("deploy failed (%v) and compose rollback failed: %w", deployErr, rbComposeErr)
+			}
+
+			appState.LastRollback = &RollbackEvent{
+				Timestamp: time.Now(),
+				Reason:    deployErr.Error(),
+				Target:    previousCommit,
+			}
+			e.saveState()
+
+			e.logger.Info("Automated rollback succeeded, app restored to previous working commit", "app", app.Name, "commit", previousCommit)
+			return false, fmt.Errorf("deployment failed healthcheck: %v (automatically rolled back to commit %s)", deployErr, previousCommit)
+		}
+
+		e.saveState()
+		return false, fmt.Errorf("compose deployment failed after git update: %w", deployErr)
 	}
 
 	if syncedCommit == "" {
 		syncedCommit = remoteCommit
 	}
 	appState.LastGitCommit = syncedCommit
+	appState.LastFailedCommit = ""
 	appState.LastDeployed = time.Now()
 	e.saveState()
 
 	return true, nil
 }
 
-// CheckAndDeployRegistry checks if any watched image has a newer digest and triggers deploy.
+// CheckAndDeployRegistry checks if any watched image has a newer digest, triggers deploy, and rolls back if health checks fail.
 func (e *Engine) CheckAndDeployRegistry(ctx context.Context, app *config.AppConfig) (bool, error) {
 	if app.Registry == nil || len(app.Registry.WatchImages) == 0 {
 		return false, nil
@@ -204,10 +255,14 @@ func (e *Engine) CheckAndDeployRegistry(ctx context.Context, app *config.AppConf
 			continue
 		}
 
+		if appState.LastFailedDigests != nil && appState.LastFailedDigests[imageRef] == remoteDigest {
+			e.logger.Debug("Skipping image digest that previously failed health check", "app", app.Name, "image", imageRef, "digest", remoteDigest)
+			continue
+		}
+
 		if currentDigest != remoteDigest {
 			e.logger.Info("New image digest detected", "app", app.Name, "image", imageRef, "old", currentDigest, "new", remoteDigest)
 			changedImages = append(changedImages, imageRef)
-			appState.ImageDigests[imageRef] = remoteDigest
 		}
 	}
 
@@ -216,8 +271,39 @@ func (e *Engine) CheckAndDeployRegistry(ctx context.Context, app *config.AppConf
 	}
 
 	// Deploy compose
-	if err := e.composeService.Deploy(ctx, app, e.cfg.Defaults.ComposeCommand); err != nil {
-		return false, fmt.Errorf("compose deployment failed after registry update: %w", err)
+	deployErr := e.composeService.Deploy(ctx, app, e.cfg.Defaults.ComposeCommand)
+	if deployErr != nil {
+		for _, img := range changedImages {
+			appState.LastFailedDigests[img] = "failed"
+		}
+
+		autoRollback := app.IsAutoRollbackEnabled(e.cfg.Defaults.IsAutoRollbackEnabled())
+		if autoRollback {
+			e.logger.Error("Deployment failed health checks after image update; triggering rollback", "app", app.Name, "error", deployErr)
+			if rbErr := e.composeService.Rollback(ctx, app, e.cfg.Defaults.ComposeCommand); rbErr != nil {
+				e.saveState()
+				return false, fmt.Errorf("deploy failed (%v) and rollback failed: %w", deployErr, rbErr)
+			}
+
+			appState.LastRollback = &RollbackEvent{
+				Timestamp: time.Now(),
+				Reason:    deployErr.Error(),
+				Target:    "previous container state",
+			}
+			e.saveState()
+			return false, fmt.Errorf("deployment failed healthcheck: %v (automatically rolled back to previous state)", deployErr)
+		}
+
+		e.saveState()
+		return false, fmt.Errorf("compose deployment failed after registry update: %w", deployErr)
+	}
+
+	for _, img := range changedImages {
+		remoteDigest, err := e.registryChecker.GetRemoteDigest(ctx, img, app.Registry.Auth)
+		if err == nil {
+			appState.ImageDigests[img] = remoteDigest
+		}
+		delete(appState.LastFailedDigests, img)
 	}
 
 	appState.LastDeployed = time.Now()
@@ -244,8 +330,16 @@ func (e *Engine) SyncApp(ctx context.Context, appName string) error {
 	lock.Lock()
 	defer lock.Unlock()
 
+	appState := e.getAppState(appName)
+	// Clear any previous failure block on manual sync
+	appState.LastFailedCommit = ""
+	appState.LastFailedDigests = make(map[string]string)
+
+	previousCommit := appState.LastGitCommit
+	var syncedCommit string
+
+	targetRepoDir := targetApp.WorkDir
 	if targetApp.Git != nil {
-		targetRepoDir := targetApp.WorkDir
 		if targetApp.Git.Path != "" && targetApp.Git.Path != "." {
 			targetRepoDir = filepath.Dir(targetApp.WorkDir)
 		}
@@ -253,14 +347,31 @@ func (e *Engine) SyncApp(ctx context.Context, appName string) error {
 		if err != nil {
 			return fmt.Errorf("git sync failed: %w", err)
 		}
-		e.getAppState(appName).LastGitCommit = commit
+		syncedCommit = commit
 	}
 
-	if err := e.composeService.Deploy(ctx, targetApp, e.cfg.Defaults.ComposeCommand); err != nil {
-		return fmt.Errorf("compose deploy failed: %w", err)
+	deployErr := e.composeService.Deploy(ctx, targetApp, e.cfg.Defaults.ComposeCommand)
+	if deployErr != nil {
+		autoRollback := targetApp.IsAutoRollbackEnabled(e.cfg.Defaults.IsAutoRollbackEnabled())
+		if autoRollback && previousCommit != "" && targetApp.Git != nil {
+			e.logger.Error("Manual sync failed health check; triggering automated rollback", "app", appName, "rollback_commit", previousCommit, "error", deployErr)
+			_ = e.gitSyncer.Rollback(ctx, targetRepoDir, targetApp.Git, previousCommit)
+			_ = e.composeService.Rollback(ctx, targetApp, e.cfg.Defaults.ComposeCommand)
+			appState.LastRollback = &RollbackEvent{
+				Timestamp: time.Now(),
+				Reason:    deployErr.Error(),
+				Target:    previousCommit,
+			}
+			e.saveState()
+			return fmt.Errorf("deployment failed healthcheck: %v (automatically rolled back to commit %s)", deployErr, previousCommit)
+		}
+		return fmt.Errorf("compose deploy failed: %w", deployErr)
 	}
 
-	e.getAppState(appName).LastDeployed = time.Now()
+	if syncedCommit != "" {
+		appState.LastGitCommit = syncedCommit
+	}
+	appState.LastDeployed = time.Now()
 	e.saveState()
 	return nil
 }

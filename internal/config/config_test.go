@@ -66,6 +66,9 @@ apps:
 	if app.WorkDir != "/tmp/docker-works/apps/my-app" {
 		t.Errorf("expected default workdir /tmp/docker-works/apps/my-app, got %s", app.WorkDir)
 	}
+	if !app.IsAutoRollbackEnabled(true) {
+		t.Errorf("expected auto_rollback to be true by default")
+	}
 }
 
 func TestConfigValidation(t *testing.T) {

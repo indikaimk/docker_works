@@ -60,3 +60,23 @@ func TestBuildAuthRepoURL(t *testing.T) {
 		t.Errorf("expected token injected into URL, got %s", res)
 	}
 }
+
+func TestSyncerRollback(t *testing.T) {
+	runner := &mockGitRunner{}
+	syncer := NewSyncer(runner, nil)
+
+	gitCfg := &config.GitConfig{
+		Repo:   "https://github.com/example/repo.git",
+		Branch: "main",
+	}
+
+	err := syncer.Rollback(context.Background(), "/tmp/app", gitCfg, "targetcommit123")
+	if err != nil {
+		t.Fatalf("rollback failed: %v", err)
+	}
+
+	expectedReset := "git reset --hard targetcommit123"
+	if len(runner.executed) < 2 || runner.executed[0] != expectedReset {
+		t.Errorf("expected '%s', got %v", expectedReset, runner.executed)
+	}
+}
