@@ -190,16 +190,44 @@ curl -X POST "http://127.0.0.1:8080/webhooks/my-app" \
 
 ---
 
-## 🧪 Testing
+---
 
-Run the full test suite:
+## 🛠️ Development & CI/CD
+
+### Local Development Commands
+
+A root [Makefile](file:///Users/indika/projects/docker_works/Makefile) is provided for developer velocity:
 
 ```bash
-go test -v ./...
+# Run tests with race detection and code coverage
+make test
+
+# Lint and verify code formatting
+make lint
+
+# Check local host prerequisites
+make doctor
+
+# Build release binary into bin/docker-works
+make build
 ```
+
+### Automated Releases & Packages
+
+Releases are automated via GitHub Actions and GoReleaser:
+
+1. Push a semantic version tag:
+   ```bash
+   git tag v0.2.0
+   git push origin v0.2.0
+   ```
+2. The [release.yml](file:///Users/indika/projects/docker_works/.github/workflows/release.yml) workflow triggers, generating:
+   - Multi-architecture static binaries (`linux/amd64`, `linux/arm64`, `darwin/amd64`, `darwin/arm64`)
+   - Native Linux packages: `.deb` (Ubuntu/Debian) and `.rpm` (Fedora/RHEL) with systemd integration
+   - Checksums (`checksums.txt`) and automatic release notes on GitHub
 
 ---
 
 ## 📄 License
 
-MIT License. See [LICENSE.txt](file:///home/indika/projects/docker_works/LICENSE.txt) for details.
+MIT License. See [LICENSE.txt](file:///Users/indika/projects/docker_works/LICENSE.txt) for details.

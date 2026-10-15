@@ -1,0 +1,76 @@
+version: 2
+
+project_name: docker-works
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: docker-works
+    main: ./cmd/docker-works
+    binary: docker-works
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.Version={{.Version}}
+      - -X main.GitCommit={{.ShortCommit}}
+      - -X main.BuildDate={{.Date}}
+
+archives:
+  - id: default
+    format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE.txt
+      - examples/config.example.yaml
+      - packaging/systemd/docker-works.service
+      - scripts/setup-docker.sh
+      - scripts/install.sh
+
+nfpms:
+  - id: packages
+    package_name: docker-works
+    vendor: indikaimk
+    homepage: https://github.com/indikaimk/docker_works
+    maintainer: indikaimk <indikaimk@gmail.com>
+    description: Lightweight GitOps & auto-update daemon for Docker Compose
+    license: MIT
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/local/bin
+    contents:
+      - src: packaging/systemd/docker-works.service
+        dst: /etc/systemd/system/docker-works.service
+      - src: examples/config.example.yaml
+        dst: /etc/docker-works/config.example.yaml
+      - src: scripts/setup-docker.sh
+        dst: /usr/local/share/docker-works/setup-docker.sh
+        file_info:
+          mode: 0755
+    scripts:
+      postinstall: packaging/scripts/postinstall.sh
+      preremove: packaging/scripts/preremove.sh
+
+checksum:
+  name_template: "checksums.txt"
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"

@@ -257,4 +257,3 @@ func TestEngineRollbackOnHealthCheckFailure(t *testing.T) {
 		t.Errorf("expected LastFailedCommit to be cleared after successful deployment, got %s", appState.LastFailedCommit)
 	}
 }
-
