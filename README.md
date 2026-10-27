@@ -76,26 +76,40 @@ A lightweight, zero-dependency GitOps and auto-update daemon for **Docker Compos
 
 ## 🚀 Quick Start
 
-### 1. Build & Install as a Systemd Service
+### 1. Install Pre-built Binary (Linux Intel & ARM)
 
+DockerWorks releases standalone static binaries and native Linux packages for **Linux x86_64 (Intel/AMD)** and **Linux ARM64**. No source code, Git, or Go compiler required on the host.
+
+#### Option A: Quick Install (Recommended)
+Automatically detects your Linux architecture, installs the pre-compiled binary, systemd service, and default configuration:
 ```bash
-git clone https://github.com/indikaimk/docker_works.git
-cd docker_works
-sudo ./scripts/install.sh
+curl -fsSL https://raw.githubusercontent.com/indikaimk/docker_works/main/scripts/install.sh | sudo bash
 ```
 
 > [!NOTE]
 > `install.sh` automatically checks for Docker and Docker Compose on the host. If missing, it invokes `scripts/setup-docker.sh` to install Docker CE, the Docker Compose plugin, and start the systemd service on **Ubuntu**, **Debian**, and **Fedora**.
->
-> You can also run the Docker setup script standalone:
-> ```bash
-> sudo ./scripts/setup-docker.sh
-> ```
 
-Or build manually:
+#### Option B: Native Linux Packages (.deb / .rpm)
+Download and install the native package for your architecture:
+
+| Platform | Architecture | Package Command |
+| :--- | :--- | :--- |
+| **Ubuntu / Debian** | **Intel (amd64)** | `sudo dpkg -i docker-works_0.1.0_linux_amd64.deb` |
+| **Ubuntu / Debian** | **ARM (arm64)** | `sudo dpkg -i docker-works_0.1.0_linux_arm64.deb` |
+| **Fedora / RHEL** | **Intel (amd64)** | `sudo rpm -ivh docker-works_0.1.0_linux_amd64.rpm` |
+| **Fedora / RHEL** | **ARM (arm64)** | `sudo rpm -ivh docker-works_0.1.0_linux_arm64.rpm` |
+
+#### Option C: Direct Binary Download & Extract
+Download the pre-compiled binary archive directly from the [latest release](https://github.com/indikaimk/docker_works/releases/latest):
+
 ```bash
-go build -o /usr/local/bin/docker-works ./cmd/docker-works
+# For Linux Intel (x86_64 / amd64):
+curl -fsSL https://github.com/indikaimk/docker_works/releases/latest/download/docker-works_0.1.0_linux_amd64.tar.gz | sudo tar -xz -C /usr/local/bin docker-works
+
+# For Linux ARM (aarch64 / arm64):
+curl -fsSL https://github.com/indikaimk/docker_works/releases/latest/download/docker-works_0.1.0_linux_arm64.tar.gz | sudo tar -xz -C /usr/local/bin docker-works
 ```
+
 
 ### 2. Configuration (`/etc/docker-works/config.yaml`)
 
@@ -218,8 +232,8 @@ Releases are automated via GitHub Actions and GoReleaser:
 
 1. Push a semantic version tag:
    ```bash
-   git tag v0.2.0
-   git push origin v0.2.0
+   git tag v0.1.0
+   git push origin v0.1.0
    ```
 2. The [release.yml](file:///Users/indika/projects/docker_works/.github/workflows/release.yml) workflow triggers, generating:
    - Multi-architecture static binaries (`linux/amd64`, `linux/arm64`, `darwin/amd64`, `darwin/arm64`)

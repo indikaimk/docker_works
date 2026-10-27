@@ -74,3 +74,11 @@ changelog:
       - "^docs:"
       - "^test:"
       - "^ci:"
+
+release:
+  github:
+    owner: indikaimk
+    name: docker_works
+  mode: keep-existing
+  replace_existing_artifacts: true
+
