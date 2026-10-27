@@ -80,14 +80,23 @@ A lightweight, zero-dependency GitOps and auto-update daemon for **Docker Compos
 
 DockerWorks releases standalone static binaries and native Linux packages for **Linux x86_64 (Intel/AMD)** and **Linux ARM64**. No source code, Git, or Go compiler required on the host.
 
-#### Option A: Quick Install (Recommended)
-Automatically detects your Linux architecture, installs the pre-compiled binary, systemd service, and default configuration:
+#### Option A: One-Line Quick Install (Recommended)
+Automatically detects your CPU architecture (Intel or ARM), downloads the latest binary, installs systemd service, and sets up default configuration:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/indikaimk/docker_works/main/scripts/install.sh | sudo bash
 ```
 
+Custom options can be passed via `bash -s --`:
+```bash
+# Install a specific version
+curl -fsSL https://raw.githubusercontent.com/indikaimk/docker_works/main/scripts/install.sh | sudo bash -s -- --version 0.1.0
+
+# Skip host Docker & Compose prerequisite checks
+curl -fsSL https://raw.githubusercontent.com/indikaimk/docker_works/main/scripts/install.sh | sudo bash -s -- --skip-docker
+```
+
 > [!NOTE]
-> `install.sh` automatically checks for Docker and Docker Compose on the host. If missing, it invokes `scripts/setup-docker.sh` to install Docker CE, the Docker Compose plugin, and start the systemd service on **Ubuntu**, **Debian**, and **Fedora**.
+> `install.sh` automatically checks for Docker CE and Docker Compose on the host. If missing, it invokes `scripts/setup-docker.sh` to install Docker CE and the Docker Compose plugin on **Ubuntu**, **Debian**, and **Fedora**.
 
 #### Option B: Native Linux Packages (.deb / .rpm)
 Download and install the native package for your architecture:
