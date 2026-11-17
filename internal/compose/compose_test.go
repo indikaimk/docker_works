@@ -189,3 +189,39 @@ func TestParseContainerStatuses(t *testing.T) {
 		t.Fatalf("failed to parse ndjson: %v", err)
 	}
 }
+
+func TestComposeDeployPodman(t *testing.T) {
+	runner := &mockRunner{}
+	service := NewService(runner, nil)
+
+	tempDir := t.TempDir()
+	app := &config.AppConfig{
+		Name:               "podman-app",
+		WorkDir:            tempDir,
+		ComposeFiles:       []string{"docker-compose.yml"},
+		HealthCheckTimeout: 2 * time.Second,
+		AutoPrune:          true,
+	}
+
+	err := service.Deploy(context.Background(), app, "podman compose")
+	if err != nil {
+		t.Fatalf("podman deploy failed: %v", err)
+	}
+
+	expectedSeq := []string{
+		"podman compose -f docker-compose.yml pull",
+		"podman compose -f docker-compose.yml up -d --remove-orphans",
+		"podman compose -f docker-compose.yml ps --format json",
+		"podman image prune -f",
+	}
+
+	if len(runner.commands) != len(expectedSeq) {
+		t.Fatalf("expected %d commands, got %d:\n%v", len(expectedSeq), len(runner.commands), runner.commands)
+	}
+
+	for i, exp := range expectedSeq {
+		if runner.commands[i] != exp {
+			t.Errorf("step %d: expected '%s', got '%s'", i, exp, runner.commands[i])
+		}
+	}
+}

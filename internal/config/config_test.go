@@ -89,3 +89,56 @@ apps:
 		t.Fatalf("expected validation error for app with no watchers, got nil")
 	}
 }
+
+func TestPodmanRuntimeDefaults(t *testing.T) {
+	tempDir := t.TempDir()
+	cfgPath := filepath.Join(tempDir, "podman.yaml")
+
+	yamlContent := `
+defaults:
+  runtime: "PODMAN"
+
+apps:
+  - name: "podman-app"
+    git:
+      repo: "https://github.com/example/repo.git"
+`
+	if err := os.WriteFile(cfgPath, []byte(yamlContent), 0644); err != nil {
+		t.Fatalf("failed to write test config: %v", err)
+	}
+
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatalf("failed to load podman config: %v", err)
+	}
+
+	if cfg.Defaults.Runtime != RuntimePodman {
+		t.Errorf("expected normalized runtime %q, got %q", RuntimePodman, cfg.Defaults.Runtime)
+	}
+	if cfg.Defaults.ComposeCommand != "podman compose" {
+		t.Errorf("expected default compose_command 'podman compose', got %q", cfg.Defaults.ComposeCommand)
+	}
+}
+
+func TestInvalidRuntimeValidation(t *testing.T) {
+	tempDir := t.TempDir()
+	cfgPath := filepath.Join(tempDir, "bad-runtime.yaml")
+
+	yamlContent := `
+defaults:
+  runtime: "containerd"
+
+apps:
+  - name: "my-app"
+    git:
+      repo: "https://github.com/example/repo.git"
+`
+	if err := os.WriteFile(cfgPath, []byte(yamlContent), 0644); err != nil {
+		t.Fatalf("failed to write test config: %v", err)
+	}
+
+	_, err := Load(cfgPath)
+	if err == nil {
+		t.Fatalf("expected validation error for unsupported runtime, got nil")
+	}
+}

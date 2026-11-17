@@ -22,7 +22,13 @@ type ServerConfig struct {
 	WebhookSecret string `yaml:"webhook_secret"`
 }
 
+const (
+	RuntimeDocker = "docker"
+	RuntimePodman = "podman"
+)
+
 type DefaultsConfig struct {
+	Runtime              string        `yaml:"runtime"`
 	GitPollInterval      time.Duration `yaml:"git_poll_interval"`
 	RegistryPollInterval time.Duration `yaml:"registry_poll_interval"`
 	ComposeCommand       string        `yaml:"compose_command"`
@@ -132,6 +138,11 @@ func (c *Config) applyDefaults(configDir string) {
 		c.Server.Listen = "127.0.0.1:8080"
 	}
 
+	c.Defaults.Runtime = strings.ToLower(strings.TrimSpace(c.Defaults.Runtime))
+	if c.Defaults.Runtime == "" {
+		c.Defaults.Runtime = RuntimeDocker
+	}
+
 	if c.Defaults.GitPollInterval <= 0 {
 		c.Defaults.GitPollInterval = 2 * time.Minute
 	}
@@ -139,7 +150,11 @@ func (c *Config) applyDefaults(configDir string) {
 		c.Defaults.RegistryPollInterval = 5 * time.Minute
 	}
 	if c.Defaults.ComposeCommand == "" {
-		c.Defaults.ComposeCommand = "docker compose"
+		if c.Defaults.Runtime == RuntimePodman {
+			c.Defaults.ComposeCommand = "podman compose"
+		} else {
+			c.Defaults.ComposeCommand = "docker compose"
+		}
 	}
 	if c.Defaults.StateDir == "" {
 		c.Defaults.StateDir = "/var/lib/docker-works"
@@ -194,6 +209,10 @@ func (c *Config) applyDefaults(configDir string) {
 }
 
 func (c *Config) Validate() error {
+	if c.Defaults.Runtime != RuntimeDocker && c.Defaults.Runtime != RuntimePodman {
+		return fmt.Errorf("defaults.runtime must be '%s' or '%s', got %q", RuntimeDocker, RuntimePodman, c.Defaults.Runtime)
+	}
+
 	names := make(map[string]struct{})
 
 	for i, app := range c.Apps {

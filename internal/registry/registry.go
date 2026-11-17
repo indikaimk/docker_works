@@ -2,8 +2,12 @@ package registry
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/google/go-containerregistry/pkg/authn"
@@ -63,8 +67,10 @@ func (c *RemoteChecker) GetRemoteDigest(ctx context.Context, imageRef string, au
 	if auth != nil {
 		opts = append(opts, remote.WithAuth(auth))
 	} else {
-		// Fallback to host Docker config (~/.docker/config.json)
-		opts = append(opts, remote.WithAuthFromKeychain(authn.DefaultKeychain))
+		// Fallback to host Docker (~/.docker/config.json) and Podman (auth.json) credentials
+		opts = append(opts, remote.WithAuthFromKeychain(
+			authn.NewMultiKeychain(authn.DefaultKeychain, &podmanKeychain{}),
+		))
 	}
 
 	// Try remote.Head first (fastest HEAD HTTP request)
@@ -80,4 +86,57 @@ func (c *RemoteChecker) GetRemoteDigest(ctx context.Context, imageRef string, au
 	}
 
 	return descriptor.Digest.String(), nil
+}
+
+// podmanKeychain resolves registry credentials from Podman auth.json files.
+type podmanKeychain struct{}
+
+type authFile struct {
+	Auths map[string]struct {
+		Auth string `json:"auth"`
+	} `json:"auths"`
+}
+
+func (k *podmanKeychain) Resolve(res authn.Resource) (authn.Authenticator, error) {
+	registry := res.RegistryStr()
+	for _, path := range podmanAuthPaths() {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var af authFile
+		if err := json.Unmarshal(data, &af); err != nil {
+			continue
+		}
+		for key, entry := range af.Auths {
+			normalized := strings.TrimPrefix(strings.TrimPrefix(key, "https://"), "http://")
+			normalized = strings.SplitN(normalized, "/", 2)[0]
+			if !strings.EqualFold(normalized, registry) || entry.Auth == "" {
+				continue
+			}
+			decoded, err := base64.StdEncoding.DecodeString(entry.Auth)
+			if err != nil {
+				continue
+			}
+			parts := strings.SplitN(string(decoded), ":", 2)
+			if len(parts) == 2 {
+				return &authn.Basic{Username: parts[0], Password: parts[1]}, nil
+			}
+		}
+	}
+	return authn.Anonymous, nil
+}
+
+func podmanAuthPaths() []string {
+	var paths []string
+	if p := os.Getenv("REGISTRY_AUTH_FILE"); p != "" {
+		paths = append(paths, p)
+	}
+	if xdg := os.Getenv("XDG_RUNTIME_DIR"); xdg != "" {
+		paths = append(paths, filepath.Join(xdg, "containers", "auth.json"))
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		paths = append(paths, filepath.Join(home, ".config", "containers", "auth.json"))
+	}
+	return paths
 }

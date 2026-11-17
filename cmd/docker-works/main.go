@@ -198,6 +198,7 @@ func runValidate(args []string) {
 func runDoctor(args []string) {
 	fs := flag.NewFlagSet("doctor", flag.ExitOnError)
 	configPath := fs.String("config", "", "Path to configuration file")
+	runtimeFlag := fs.String("runtime", "", "Container runtime to check (docker or podman)")
 	_ = fs.Parse(args)
 
 	fmt.Println("DockerWorks Environment Check (Doctor)")
@@ -205,8 +206,26 @@ func runDoctor(args []string) {
 
 	allPass := true
 
+	// Resolve configuration early so we know which runtime to inspect
+	resolvedPath := findDefaultConfig(*configPath)
+	var loadedCfg *config.Config
+	var cfgLoadErr error
+	_, cfgStatErr := os.Stat(resolvedPath)
+	if cfgStatErr == nil {
+		loadedCfg, cfgLoadErr = config.Load(resolvedPath)
+	}
+
+	containerRuntime := strings.ToLower(strings.TrimSpace(*runtimeFlag))
+	if containerRuntime == "" && loadedCfg != nil {
+		containerRuntime = loadedCfg.Defaults.Runtime
+	}
+	if containerRuntime == "" {
+		containerRuntime = config.RuntimeDocker
+	}
+
 	// 1. OS & Architecture
 	fmt.Printf("[✓] OS / Architecture: %s / %s\n", runtime.GOOS, runtime.GOARCH)
+	fmt.Printf("[i] Container Runtime: %s\n", containerRuntime)
 
 	// 2. Git CLI
 	gitOut, err := exec.Command("git", "--version").Output()
@@ -217,44 +236,74 @@ func runDoctor(args []string) {
 		allPass = false
 	}
 
-	// 3. Docker CLI
-	dockerOut, err := exec.Command("docker", "--version").Output()
-	if err == nil {
-		fmt.Printf("[✓] Docker CLI:        %s", string(dockerOut))
-	} else {
-		fmt.Println("[✗] Docker CLI:        Not found on PATH")
-		fmt.Println("    -> Install Docker using: sudo ./scripts/setup-docker.sh (Ubuntu, Debian, Fedora)")
-		allPass = false
-	}
+	if containerRuntime == config.RuntimePodman {
+		// 3. Podman CLI
+		podmanOut, err := exec.Command("podman", "--version").Output()
+		if err == nil {
+			fmt.Printf("[✓] Podman CLI:        %s", string(podmanOut))
+		} else {
+			fmt.Println("[✗] Podman CLI:        Not found on PATH")
+			fmt.Println("    -> Install Podman using your distribution package manager (e.g. apt/dnf install podman)")
+			allPass = false
+		}
 
-	// 4. Docker Compose Plugin
-	composeOut, err := exec.Command("docker", "compose", "version").Output()
-	if err == nil {
-		fmt.Printf("[✓] Docker Compose:    %s", string(composeOut))
-	} else {
-		fmt.Println("[✗] Docker Compose:    'docker compose' plugin not found")
-		fmt.Println("    -> Install Compose using: sudo ./scripts/setup-docker.sh (Ubuntu, Debian, Fedora)")
-		allPass = false
-	}
+		// 4. Podman Compose
+		composeOut, err := exec.Command("podman", "compose", "version").Output()
+		if err == nil {
+			fmt.Printf("[✓] Podman Compose:    %s", string(composeOut))
+		} else {
+			fmt.Println("[✗] Podman Compose:    'podman compose' failed or compose provider not found")
+			fmt.Println("    -> Ensure podman 4.1+ and an external compose provider (e.g. docker-compose) are installed")
+			allPass = false
+		}
 
-	// 5. Docker Daemon Socket Connectivity
-	infoOut, err := exec.Command("docker", "info", "--format", "{{.ServerVersion}}").Output()
-	if err == nil {
-		fmt.Printf("[✓] Docker Daemon:     Connected (Server Version %s)\n", strings.TrimSpace(string(infoOut)))
+		// 5. Podman Engine & Socket
+		infoOut, err := exec.Command("podman", "info", "--format", "{{.Version.Version}}").Output()
+		if err == nil {
+			fmt.Printf("[✓] Podman Engine:     Ready (Version %s)\n", strings.TrimSpace(string(infoOut)))
+		} else {
+			fmt.Println("[!] Podman Engine:     Cannot query 'podman info'")
+			fmt.Println("    -> For rootful:  sudo systemctl enable --now podman.socket")
+			fmt.Println("    -> For rootless: systemctl --user enable --now podman.socket")
+		}
 	} else {
-		fmt.Println("[!] Docker Daemon:     Cannot communicate with Docker daemon socket (/var/run/docker.sock)")
-		fmt.Println("    -> If service is stopped, run: sudo systemctl enable --now docker")
-		fmt.Println("    -> If permission denied, add user to group: sudo usermod -aG docker $USER")
+		// 3. Docker CLI
+		dockerOut, err := exec.Command("docker", "--version").Output()
+		if err == nil {
+			fmt.Printf("[✓] Docker CLI:        %s", string(dockerOut))
+		} else {
+			fmt.Println("[✗] Docker CLI:        Not found on PATH")
+			fmt.Println("    -> Install Docker using: sudo ./scripts/setup-docker.sh (Ubuntu, Debian, Fedora)")
+			allPass = false
+		}
+
+		// 4. Docker Compose Plugin
+		composeOut, err := exec.Command("docker", "compose", "version").Output()
+		if err == nil {
+			fmt.Printf("[✓] Docker Compose:    %s", string(composeOut))
+		} else {
+			fmt.Println("[✗] Docker Compose:    'docker compose' plugin not found")
+			fmt.Println("    -> Install Compose using: sudo ./scripts/setup-docker.sh (Ubuntu, Debian, Fedora)")
+			allPass = false
+		}
+
+		// 5. Docker Daemon Socket Connectivity
+		infoOut, err := exec.Command("docker", "info", "--format", "{{.ServerVersion}}").Output()
+		if err == nil {
+			fmt.Printf("[✓] Docker Daemon:     Connected (Server Version %s)\n", strings.TrimSpace(string(infoOut)))
+		} else {
+			fmt.Println("[!] Docker Daemon:     Cannot communicate with Docker daemon socket (/var/run/docker.sock)")
+			fmt.Println("    -> If service is stopped, run: sudo systemctl enable --now docker")
+			fmt.Println("    -> If permission denied, add user to group: sudo usermod -aG docker $USER")
+		}
 	}
 
 	// 6. Configuration Check
-	resolvedPath := findDefaultConfig(*configPath)
-	if _, err := os.Stat(resolvedPath); err == nil {
-		cfg, err := config.Load(resolvedPath)
-		if err == nil {
-			fmt.Printf("[✓] Configuration:     Valid (%s, %d apps configured)\n", resolvedPath, len(cfg.Apps))
+	if cfgStatErr == nil {
+		if cfgLoadErr == nil {
+			fmt.Printf("[✓] Configuration:     Valid (%s, %d apps configured)\n", resolvedPath, len(loadedCfg.Apps))
 		} else {
-			fmt.Printf("[✗] Configuration:     Invalid syntax in %s: %v\n", resolvedPath, err)
+			fmt.Printf("[✗] Configuration:     Invalid syntax in %s: %v\n", resolvedPath, cfgLoadErr)
 			allPass = false
 		}
 	} else {

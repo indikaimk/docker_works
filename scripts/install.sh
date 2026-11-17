@@ -9,12 +9,17 @@ set -euo pipefail
 VERSION="${VERSION:-}"
 SKIP_DOCKER="${SKIP_DOCKER:-0}"
 BUILD_FROM_SOURCE="${BUILD_FROM_SOURCE:-0}"
+RUNTIME="${RUNTIME:-}"
 
 # Parse optional arguments first so --help works without sudo
 while [ $# -gt 0 ]; do
   case "$1" in
     -v|--version)
       VERSION="$2"
+      shift 2
+      ;;
+    -r|--runtime)
+      RUNTIME="$2"
       shift 2
       ;;
     --skip-docker)
@@ -33,10 +38,11 @@ while [ $# -gt 0 ]; do
       echo "  curl -fsSL https://raw.githubusercontent.com/indikaimk/docker_works/main/scripts/install.sh | sudo bash -s -- [options]"
       echo ""
       echo "Options:"
-      echo "  -v, --version <ver>   Install a specific release version (default: latest)"
-      echo "      --skip-docker     Skip automatic Docker & Compose installation check"
-      echo "      --build           Force building from local source (requires Go)"
-      echo "  -h, --help            Show this help message"
+      echo "  -v, --version <ver>       Install a specific release version (default: latest)"
+      echo "  -r, --runtime <runtime>   Container runtime: docker or podman (auto-detected if omitted)"
+      echo "      --skip-docker         Skip automatic container runtime & Compose installation check"
+      echo "      --build               Force building from local source (requires Go)"
+      echo "  -h, --help                Show this help message"
       exit 0
       ;;
     *)
@@ -93,28 +99,57 @@ if [ -z "$VERSION" ]; then
 fi
 VERSION="${VERSION#v}"
 
-# 1. Check Docker & Compose prerequisites
+# Auto-detect runtime if not specified
+if [ -z "$RUNTIME" ]; then
+  if ! command -v docker >/dev/null 2>&1 && command -v podman >/dev/null 2>&1; then
+    RUNTIME="podman"
+  else
+    RUNTIME="docker"
+  fi
+fi
+
+if [ "$RUNTIME" != "docker" ] && [ "$RUNTIME" != "podman" ]; then
+  echo "Error: Unsupported runtime '$RUNTIME'. Expected 'docker' or 'podman'."
+  exit 1
+fi
+
+echo "Container runtime: ${RUNTIME}"
+
+# 1. Check Container Runtime & Compose prerequisites
 if [ "${SKIP_DOCKER}" != "1" ]; then
-  echo "1. Checking Docker & Compose prerequisites..."
-  if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>&1; then
-    echo "   Docker or Docker Compose plugin not found on this host."
-    if [ -f "${SCRIPT_DIR}/setup-docker.sh" ]; then
-      echo "   Running automated Docker setup for host..."
-      bash "${SCRIPT_DIR}/setup-docker.sh"
-    elif command -v curl >/dev/null 2>&1; then
-      echo "   Fetching and running host Docker setup script..."
-      curl -fsSL "https://raw.githubusercontent.com/${GITHUB_REPO}/main/scripts/setup-docker.sh" | bash
-    else
-      echo "   Error: Docker is required. Please install Docker and docker compose plugin."
+  if [ "$RUNTIME" = "podman" ]; then
+    echo "1. Checking Podman & Compose prerequisites..."
+    if ! command -v podman >/dev/null 2>&1 || ! podman compose version >/dev/null 2>&1; then
+      echo "   Error: Podman and 'podman compose' are required for runtime=podman."
+      echo "   Please install Podman 4.1+ and a compose provider (e.g. docker-compose), or pass --skip-docker."
       exit 1
+    else
+      echo "   Podman and Podman Compose are already present:"
+      echo "   - $(podman --version)"
+      echo "   - $(podman compose version)"
     fi
   else
-    echo "   Docker and Docker Compose are already present:"
-    echo "   - $(docker --version)"
-    echo "   - $(docker compose version)"
+    echo "1. Checking Docker & Compose prerequisites..."
+    if ! command -v docker >/dev/null 2>&1 || ! docker compose version >/dev/null 2>&1; then
+      echo "   Docker or Docker Compose plugin not found on this host."
+      if [ -f "${SCRIPT_DIR}/setup-docker.sh" ]; then
+        echo "   Running automated Docker setup for host..."
+        bash "${SCRIPT_DIR}/setup-docker.sh"
+      elif command -v curl >/dev/null 2>&1; then
+        echo "   Fetching and running host Docker setup script..."
+        curl -fsSL "https://raw.githubusercontent.com/${GITHUB_REPO}/main/scripts/setup-docker.sh" | bash
+      else
+        echo "   Error: Docker is required. Please install Docker and docker compose plugin."
+        exit 1
+      fi
+    else
+      echo "   Docker and Docker Compose are already present:"
+      echo "   - $(docker --version)"
+      echo "   - $(docker compose version)"
+    fi
   fi
 else
-  echo "1. Skipping Docker check (--skip-docker specified)."
+  echo "1. Skipping runtime check (--skip-docker specified)."
 fi
 
 # 2. Installing binary
@@ -192,8 +227,13 @@ fi
 
 # 4. Installing systemd unit
 echo "4. Installing systemd unit..."
+UNIT_FILE="docker-works.service"
+if [ "$RUNTIME" = "podman" ]; then
+  UNIT_FILE="docker-works-podman.service"
+fi
+
 SERVICE_SRC=""
-for p in "./packaging/systemd/docker-works.service" "${SCRIPT_DIR}/../packaging/systemd/docker-works.service" "${SCRIPT_DIR}/docker-works.service" "${TMP_DIR:-}/packaging/systemd/docker-works.service"; do
+for p in "./packaging/systemd/${UNIT_FILE}" "${SCRIPT_DIR}/../packaging/systemd/${UNIT_FILE}" "${SCRIPT_DIR}/${UNIT_FILE}" "${TMP_DIR:-}/packaging/systemd/${UNIT_FILE}"; do
   if [ -f "$p" ]; then
     SERVICE_SRC="$p"
     break
@@ -205,10 +245,10 @@ if command -v systemctl >/dev/null 2>&1; then
     cp "$SERVICE_SRC" "${SYSTEMD_DIR}/docker-works.service"
   elif command -v curl >/dev/null 2>&1; then
     echo "   Fetching systemd service definition..."
-    curl -fsSL "https://raw.githubusercontent.com/${GITHUB_REPO}/main/packaging/systemd/docker-works.service" -o "${SYSTEMD_DIR}/docker-works.service"
+    curl -fsSL "https://raw.githubusercontent.com/${GITHUB_REPO}/main/packaging/systemd/${UNIT_FILE}" -o "${SYSTEMD_DIR}/docker-works.service"
   fi
   systemctl daemon-reload
-  echo "   Installed ${SYSTEMD_DIR}/docker-works.service"
+  echo "   Installed ${SYSTEMD_DIR}/docker-works.service (from ${UNIT_FILE})"
 else
   echo "   Notice: systemctl not found; skipping systemd unit installation."
 fi

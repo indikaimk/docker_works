@@ -33,6 +33,8 @@ archives:
       - LICENSE.txt
       - examples/config.example.yaml
       - packaging/systemd/docker-works.service
+      - packaging/systemd/docker-works-podman.service
+      - packaging/systemd/docker-works-podman-user.service
       - scripts/setup-docker.sh
       - scripts/install.sh
 
@@ -51,6 +53,10 @@ nfpms:
     contents:
       - src: packaging/systemd/docker-works.service
         dst: /etc/systemd/system/docker-works.service
+      - src: packaging/systemd/docker-works-podman.service
+        dst: /usr/local/share/docker-works/docker-works-podman.service
+      - src: packaging/systemd/docker-works-podman-user.service
+        dst: /usr/local/share/docker-works/docker-works-podman-user.service
       - src: examples/config.example.yaml
         dst: /etc/docker-works/config.example.yaml
       - src: scripts/setup-docker.sh

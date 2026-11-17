@@ -1,0 +1,25 @@
+[Unit]
+Description=DockerWorks - GitOps & Auto-Update Daemon for Podman Compose (Rootless User)
+Documentation=https://github.com/indikaimk/docker_works
+After=network-online.target podman.socket
+Wants=network-online.target
+Requires=podman.socket
+
+[Service]
+Type=simple
+Environment=DOCKER_HOST=unix://%t/podman/podman.sock
+ExecStart=/usr/local/bin/docker-works daemon --config %h/.config/docker-works/config.yaml
+Restart=always
+RestartSec=5s
+
+# Process management & limits
+LimitNOFILE=65536
+TimeoutStopSec=30s
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=docker-works
+
+[Install]
+WantedBy=default.target

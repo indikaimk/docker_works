@@ -2,8 +2,12 @@ package registry
 
 import (
 	"context"
+	"encoding/base64"
+	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/indikaimk/docker_works/internal/config"
 )
 
@@ -40,5 +44,36 @@ func TestInvalidImageRef(t *testing.T) {
 	_, err := checker.GetRemoteDigest(context.Background(), "INVALID::IMAGE--NAME", nil)
 	if err == nil {
 		t.Fatalf("expected error for invalid image ref, got nil")
+	}
+}
+
+func TestPodmanKeychain(t *testing.T) {
+	tempDir := t.TempDir()
+	authPath := filepath.Join(tempDir, "auth.json")
+	encoded := base64.StdEncoding.EncodeToString([]byte("myuser:mypass"))
+	content := `{"auths":{"ghcr.io":{"auth":"` + encoded + `"}}}`
+	if err := os.WriteFile(authPath, []byte(content), 0600); err != nil {
+		t.Fatalf("failed to write auth.json: %v", err)
+	}
+
+	t.Setenv("REGISTRY_AUTH_FILE", authPath)
+
+	ref, err := name.ParseReference("ghcr.io/myorg/app:latest")
+	if err != nil {
+		t.Fatalf("failed to parse ref: %v", err)
+	}
+
+	kc := &podmanKeychain{}
+	auth, err := kc.Resolve(ref.Context())
+	if err != nil {
+		t.Fatalf("resolve failed: %v", err)
+	}
+
+	cfg, err := auth.Authorization()
+	if err != nil {
+		t.Fatalf("authorization failed: %v", err)
+	}
+	if cfg.Username != "myuser" || cfg.Password != "mypass" {
+		t.Errorf("expected myuser/mypass, got %s/%s", cfg.Username, cfg.Password)
 	}
 }

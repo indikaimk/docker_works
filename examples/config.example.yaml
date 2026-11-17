@@ -6,9 +6,10 @@ server:
   webhook_secret: "secret-token" # Default webhook secret across apps
 
 defaults:
+  runtime: "docker"             # Container runtime: "docker" (default) or "podman"
   git_poll_interval: "2m"       # Default interval to check for git repo updates
   registry_poll_interval: "5m"  # Default interval to check container registries
-  compose_command: "docker compose"
+  compose_command: "docker compose" # Defaults to "docker compose" or "podman compose" based on runtime
   state_dir: "/var/lib/docker-works"
   health_check_timeout: "60s"
   auto_rollback: true           # Automatically roll back if containers fail health checks

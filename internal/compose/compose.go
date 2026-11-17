@@ -246,8 +246,9 @@ func (s *Service) Status(ctx context.Context, app *config.AppConfig, composeCmd 
 	return s.executeCompose(ctx, app, composeCmd, "ps")
 }
 
-func (s *Service) Prune(ctx context.Context) (string, error) {
-	return s.runner.Run(ctx, "", nil, "docker", "image", "prune", "-f")
+func (s *Service) Prune(ctx context.Context, composeCmd string) (string, error) {
+	bin, _ := s.getBinaryAndBaseArgs(composeCmd)
+	return s.runner.Run(ctx, "", nil, bin, "image", "prune", "-f")
 }
 
 func (s *Service) WaitForHealth(ctx context.Context, app *config.AppConfig, composeCmd string, timeout time.Duration) error {
@@ -392,9 +393,9 @@ func (s *Service) Deploy(ctx context.Context, app *config.AppConfig, composeCmd 
 
 	// 6. Optional auto prune (only reached if healthy!)
 	if app.AutoPrune {
-		s.logger.Info("Pruning unused docker images", "app", app.Name)
-		if _, err := s.Prune(ctx); err != nil {
-			s.logger.Warn("Failed to prune docker images", "error", err)
+		s.logger.Info("Pruning unused container images", "app", app.Name)
+		if _, err := s.Prune(ctx, composeCmd); err != nil {
+			s.logger.Warn("Failed to prune container images", "error", err)
 		}
 	}
 
