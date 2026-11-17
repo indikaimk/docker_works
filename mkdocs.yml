@@ -1,0 +1,52 @@
+site_name: DockerWorks
+site_description: Lightweight GitOps and auto-update daemon for Docker Compose and Podman Compose
+site_url: https://indikaimk.github.io/docker_works/
+repo_url: https://github.com/indikaimk/docker_works
+repo_name: indikaimk/docker_works
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.tabs.link
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed:
+      alternate_style: true
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - Configuration: configuration.md
+  - Podman Guide: podman.md
+  - CLI Reference: cli.md
+  - Webhooks & Health: webhooks.md
+  - Development: development.md

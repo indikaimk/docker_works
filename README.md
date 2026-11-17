@@ -1,12 +1,12 @@
 # DockerWorks
 
-A lightweight, zero-dependency GitOps and auto-update daemon for **Docker Compose**, written in Go and designed to run as a native `systemd` service on Docker hosts.
+A lightweight, zero-dependency GitOps and auto-update daemon for **Docker Compose** and **Podman Compose**, written in Go and designed to run as a native `systemd` service on Linux hosts.
 
 ---
 
 ## ✨ Features
 
-- **🚀 Native Docker Compose Engine**: Invokes the host's `docker compose` CLI directly, supporting all compose versions, multiple compose files (`-f`), and `.env` files.
+- **🚀 Native Compose Engine**: Invokes `docker compose` or `podman compose` directly via `defaults.runtime` (`docker` or `podman`), supporting multiple compose files (`-f`) and `.env` files.
 - **🔄 GitOps Mode (Pull-based)**:
   - Watches Git repositories (GitHub, GitLab, Gitea, etc.) for new commits on target branches.
   - Efficiently checks remote heads via `git ls-remote` without cloning or downloading on every poll.
@@ -26,7 +26,7 @@ A lightweight, zero-dependency GitOps and auto-update daemon for **Docker Compos
 - **🛠️ Lifecycle & Rollback Hooks**:
   - Custom shell commands before deployment (`pre_deploy`), after successful deployment (`post_deploy` e.g., running database migrations), and on rollback events (`on_rollback`).
 - **🧹 Auto Prune**:
-  - Automatically cleans up orphaned images with `docker image prune -f` only after successful deployments.
+  - Automatically cleans up orphaned images with `docker image prune -f` or `podman image prune -f` (matching `defaults.runtime`) only after successful deployments.
 - **🐧 Systemd Daemon**:
   - Single static binary, low memory footprint (~15-30 MB), logs directly to `journald`.
 
@@ -91,12 +91,15 @@ Custom options can be passed via `bash -s --`:
 # Install a specific version
 curl -fsSL https://raw.githubusercontent.com/indikaimk/docker_works/main/scripts/install.sh | sudo bash -s -- --version 0.1.0
 
-# Skip host Docker & Compose prerequisite checks
+# Skip host container runtime & Compose prerequisite checks
 curl -fsSL https://raw.githubusercontent.com/indikaimk/docker_works/main/scripts/install.sh | sudo bash -s -- --skip-docker
+
+# Install and configure systemd unit for Podman
+curl -fsSL https://raw.githubusercontent.com/indikaimk/docker_works/main/scripts/install.sh | sudo bash -s -- --runtime podman
 ```
 
 > [!NOTE]
-> `install.sh` automatically checks for Docker CE and Docker Compose on the host. If missing, it invokes `scripts/setup-docker.sh` to install Docker CE and the Docker Compose plugin on **Ubuntu**, **Debian**, and **Fedora**.
+> When using Docker, `install.sh` automatically checks for Docker CE and Docker Compose on the host and invokes `scripts/setup-docker.sh` if missing (Ubuntu, Debian, Fedora). When `--runtime podman` is specified (or Podman is auto-detected when Docker is absent), `install.sh` verifies `podman` and `podman compose` and installs the Podman systemd unit (`docker-works-podman.service`).
 
 #### Option B: Native Linux Packages (.deb / .rpm)
 Download and install the native package for your architecture:
@@ -129,9 +132,10 @@ server:
   webhook_secret: "my-webhook-secret"
 
 defaults:
+  runtime: "docker"             # "docker" (default) or "podman"
   git_poll_interval: "2m"
   registry_poll_interval: "5m"
-  compose_command: "docker compose"
+  compose_command: "docker compose" # Auto-defaults to "podman compose" when runtime is "podman"
   state_dir: "/var/lib/docker-works"
 
 apps:
@@ -182,13 +186,78 @@ journalctl -u docker-works -f
 
 ---
 
+## 🦭 Podman Support (Rootful & Rootless)
+
+DockerWorks supports **Podman** via `podman compose` (Podman 4.1+ with an external compose provider such as `docker-compose`) and ships dedicated systemd units for both rootful and rootless deployments.
+
+### Configuration
+
+Set `defaults.runtime` to `"podman"` in your `config.yaml`:
+
+```yaml
+defaults:
+  runtime: "podman"             # Automatically sets compose_command to "podman compose"
+  state_dir: "/var/lib/docker-works" # Use a user-writable path for rootless mode
+```
+
+When `defaults.runtime: "podman"` is configured:
+- `defaults.compose_command` automatically defaults to `"podman compose"` (unless explicitly overridden).
+- `auto_prune: true` runs `podman image prune -f`.
+- `docker-works doctor` checks `podman --version`, `podman compose version`, and `podman info`.
+- Registry digest polling checks Podman's `auth.json` (`$REGISTRY_AUTH_FILE`, `$XDG_RUNTIME_DIR/containers/auth.json`, `~/.config/containers/auth.json`) in addition to `~/.docker/config.json`.
+
+### Option A: Rootful Podman (System Service)
+
+1. Enable the Podman system socket:
+   ```bash
+   sudo systemctl enable --now podman.socket
+   ```
+2. Install the rootful Podman systemd unit (automatically selected by `install.sh --runtime podman`, or available at `/usr/local/share/docker-works/docker-works-podman.service` from `.deb`/`.rpm` packages):
+   ```bash
+   sudo cp packaging/systemd/docker-works-podman.service /etc/systemd/system/docker-works.service
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now docker-works
+   ```
+3. Verify the environment:
+   ```bash
+   sudo docker-works doctor --config /etc/docker-works/config.yaml
+   ```
+
+### Option B: Rootless Podman (User Service)
+
+1. Enable the user-level Podman socket and lingering (so services stay running after logout):
+   ```bash
+   systemctl --user enable --now podman.socket
+   loginctl enable-linger "$USER"
+   ```
+2. Create your user config at `~/.config/docker-works/config.yaml` with `runtime: "podman"` and a user-writable `state_dir` (e.g. `~/.local/share/docker-works`):
+   ```yaml
+   defaults:
+     runtime: "podman"
+     state_dir: "/home/youruser/.local/share/docker-works"
+   ```
+3. Install the rootless user unit ([docker-works-podman-user.service](packaging/systemd/docker-works-podman-user.service)):
+   ```bash
+   mkdir -p ~/.config/systemd/user
+   cp packaging/systemd/docker-works-podman-user.service ~/.config/systemd/user/docker-works.service
+   systemctl --user daemon-reload
+   systemctl --user enable --now docker-works
+   ```
+4. Verify and monitor:
+   ```bash
+   docker-works doctor --config ~/.config/docker-works/config.yaml
+   journalctl --user -u docker-works -f
+   ```
+
+---
+
 ## 💻 CLI Commands
 
 | Command | Description | Example |
 | :--- | :--- | :--- |
 | `daemon` | Runs background watchers and webhook server | `docker-works daemon --config /etc/docker-works/config.yaml` |
 | `sync` | Manually syncs and deploys an app immediately | `docker-works sync --config /etc/docker-works/config.yaml --app my-app` |
-| `doctor` | Checks host environment, Docker, Compose, and config | `docker-works doctor --config /etc/docker-works/config.yaml` |
+| `doctor` | Checks host environment, runtime (`--runtime docker\|podman`), Compose, and config | `docker-works doctor --config /etc/docker-works/config.yaml` |
 | `validate` | Validates configuration file syntax and app definitions | `docker-works validate --config config.yaml` |
 | `version` | Displays version and build metadata | `docker-works version` |
 
@@ -219,7 +288,7 @@ curl -X POST "http://127.0.0.1:8080/webhooks/my-app" \
 
 ### Local Development Commands
 
-A root [Makefile](file:///Users/indika/projects/docker_works/Makefile) is provided for developer velocity:
+A root [Makefile](Makefile) is provided for developer velocity:
 
 ```bash
 # Run tests with race detection and code coverage
@@ -244,7 +313,7 @@ Releases are automated via GitHub Actions and GoReleaser:
    git tag v0.1.0
    git push origin v0.1.0
    ```
-2. The [release.yml](file:///Users/indika/projects/docker_works/.github/workflows/release.yml) workflow triggers, generating:
+2. The [release.yml](.github/workflows/release.yml) workflow triggers, generating:
    - Multi-architecture static binaries (`linux/amd64`, `linux/arm64`, `darwin/amd64`, `darwin/arm64`)
    - Native Linux packages: `.deb` (Ubuntu/Debian) and `.rpm` (Fedora/RHEL) with systemd integration
    - Checksums (`checksums.txt`) and automatic release notes on GitHub
@@ -253,4 +322,4 @@ Releases are automated via GitHub Actions and GoReleaser:
 
 ## 📄 License
 
-MIT License. See [LICENSE.txt](file:///Users/indika/projects/docker_works/LICENSE.txt) for details.
+MIT License. See [LICENSE.txt](LICENSE.txt) for details.

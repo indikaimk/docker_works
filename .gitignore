@@ -10,6 +10,9 @@ bin/
 data/
 *.log
 
+# Documentation build
+site/
+
 # Editor / OS
 .DS_Store
 .idea/
