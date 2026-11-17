@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-17
+
+### Added
+- **Podman Runtime Support**: Added `defaults.runtime` (`docker` or `podman`) in `config.yaml`, automatically defaulting `compose_command` to `"podman compose"` and image pruning to `podman image prune -f`.
+- **Podman Systemd Units**: Added `packaging/systemd/docker-works-podman.service` (rootful system unit) and `packaging/systemd/docker-works-podman-user.service` (rootless user unit), included in release archives and `.deb`/`.rpm` packages.
+- **Podman Registry Auth Fallback**: Added `auth.json` credential resolution (`$REGISTRY_AUTH_FILE`, `$XDG_RUNTIME_DIR/containers/auth.json`, `~/.config/containers/auth.json`) alongside `~/.docker/config.json`.
+- **Doctor Runtime Inspection**: Updated `docker-works doctor` to detect `defaults.runtime` from config or `--runtime docker|podman` and verify Podman CLI, `podman compose`, and `podman info`.
+- **Installer Runtime Support**: Updated `scripts/install.sh` with `--runtime <docker|podman>` (and auto-detection when Docker is absent) to validate Podman prerequisites and install `docker-works-podman.service`.
+- **MkDocs Material Documentation**: Added `mkdocs.yml`, structured documentation under `docs/`, and `.github/workflows/docs.yml` for GitHub Pages deployment.
+
 ## [0.1.0] - 2026-10-27
 
 ### Added
