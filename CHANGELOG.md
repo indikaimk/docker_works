@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.2.0] - 2026-11-19
+## [0.3.0] - 2026-11-19
 
 ### Added
 - **Podman Runtime Support**: Added `defaults.runtime` (`docker` or `podman`) in `config.yaml`, automatically defaulting `compose_command` to `"podman compose"` and image pruning to `podman image prune -f`.
