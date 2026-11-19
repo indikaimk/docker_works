@@ -324,8 +324,11 @@ func (s *Service) RunHook(ctx context.Context, hookCmd string, dir string, appNa
 	return nil
 }
 
-// Rollback restores containers to previous state using on_rollback hook and docker compose up.
+// Rollback restores containers to previous state using on_rollback hook and docker compose up (or quadlet rollback).
 func (s *Service) Rollback(ctx context.Context, app *config.AppConfig, composeCmd string) error {
+	if app.Mode == config.ModeQuadlet {
+		return s.rollbackQuadlet(ctx, app)
+	}
 	s.logger.Warn("Executing compose rollback for app", "app", app.Name, "work_dir", app.WorkDir)
 
 	// 1. Run on_rollback hook if configured
@@ -353,6 +356,9 @@ func (s *Service) Rollback(ctx context.Context, app *config.AppConfig, composeCm
 
 // Deploy coordinates the full deployment cycle: pre-deploy hook -> pull -> up -> health check -> post-deploy hook -> prune.
 func (s *Service) Deploy(ctx context.Context, app *config.AppConfig, composeCmd string) error {
+	if app.Mode == config.ModeQuadlet {
+		return s.deployQuadlet(ctx, app)
+	}
 	s.logger.Info("Starting deployment for app", "app", app.Name, "work_dir", app.WorkDir)
 
 	// Ensure work directory exists

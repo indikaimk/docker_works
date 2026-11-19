@@ -142,3 +142,55 @@ apps:
 		t.Fatalf("expected validation error for unsupported runtime, got nil")
 	}
 }
+
+func TestQuadletConfigDefaultsAndValidation(t *testing.T) {
+	tempDir := t.TempDir()
+	cfgPath := filepath.Join(tempDir, "quadlet.yaml")
+
+	yamlContent := `
+defaults:
+  runtime: "podman"
+
+apps:
+  - name: "web-quadlet"
+    quadlet:
+      user_mode: false
+    git:
+      repo: "https://github.com/example/quadlets.git"
+`
+	if err := os.WriteFile(cfgPath, []byte(yamlContent), 0644); err != nil {
+		t.Fatalf("failed to write test config: %v", err)
+	}
+
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatalf("failed to load quadlet config: %v", err)
+	}
+
+	app := cfg.Apps[0]
+	if app.Mode != ModeQuadlet {
+		t.Errorf("expected mode %q, got %q", ModeQuadlet, app.Mode)
+	}
+	if app.Quadlet == nil || app.Quadlet.Dir != "/etc/containers/systemd" {
+		t.Errorf("expected quadlet dir /etc/containers/systemd, got %+v", app.Quadlet)
+	}
+
+	// Quadlet mode with docker runtime should fail validation
+	badCfgPath := filepath.Join(tempDir, "bad-quadlet.yaml")
+	badYaml := `
+defaults:
+  runtime: "docker"
+
+apps:
+  - name: "web-quadlet"
+    mode: "quadlet"
+    git:
+      repo: "https://github.com/example/quadlets.git"
+`
+	if err := os.WriteFile(badCfgPath, []byte(badYaml), 0644); err != nil {
+		t.Fatalf("failed to write test config: %v", err)
+	}
+	if _, err := Load(badCfgPath); err == nil {
+		t.Fatalf("expected validation error for quadlet mode with docker runtime")
+	}
+}

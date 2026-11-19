@@ -25,6 +25,9 @@ type ServerConfig struct {
 const (
 	RuntimeDocker = "docker"
 	RuntimePodman = "podman"
+
+	ModeCompose = "compose"
+	ModeQuadlet = "quadlet"
 )
 
 type DefaultsConfig struct {
@@ -47,9 +50,11 @@ func (d *DefaultsConfig) IsAutoRollbackEnabled() bool {
 type AppConfig struct {
 	Name               string          `yaml:"name"`
 	Enabled            *bool           `yaml:"enabled"`
+	Mode               string          `yaml:"mode"`
 	WorkDir            string          `yaml:"work_dir"`
 	ComposeFiles       []string        `yaml:"compose_files"`
 	EnvFiles           []string        `yaml:"env_files"`
+	Quadlet            *QuadletConfig  `yaml:"quadlet"`
 	Git                *GitConfig      `yaml:"git"`
 	Registry           *RegistryConfig `yaml:"registry"`
 	Webhook            *WebhookConfig  `yaml:"webhook"`
@@ -57,6 +62,20 @@ type AppConfig struct {
 	AutoPrune          bool            `yaml:"auto_prune"`
 	HealthCheckTimeout time.Duration   `yaml:"health_check_timeout"`
 	AutoRollback       *bool           `yaml:"auto_rollback"`
+}
+
+type QuadletConfig struct {
+	Dir      string   `yaml:"dir"`
+	Files    []string `yaml:"files"`
+	Services []string `yaml:"services"`
+	UserMode *bool    `yaml:"user_mode"`
+}
+
+func (q *QuadletConfig) IsUserMode() bool {
+	if q != nil && q.UserMode != nil {
+		return *q.UserMode
+	}
+	return os.Geteuid() != 0
 }
 
 func (a *AppConfig) IsEnabled() bool {
@@ -170,7 +189,31 @@ func (c *Config) applyDefaults(configDir string) {
 	for i := range c.Apps {
 		app := &c.Apps[i]
 
-		if len(app.ComposeFiles) == 0 {
+		app.Mode = strings.ToLower(strings.TrimSpace(app.Mode))
+		if app.Mode == "" {
+			if app.Quadlet != nil {
+				app.Mode = ModeQuadlet
+			} else {
+				app.Mode = ModeCompose
+			}
+		}
+
+		if app.Mode == ModeQuadlet {
+			if app.Quadlet == nil {
+				app.Quadlet = &QuadletConfig{}
+			}
+			if app.Quadlet.UserMode == nil {
+				userMode := os.Geteuid() != 0
+				app.Quadlet.UserMode = &userMode
+			}
+			if app.Quadlet.Dir == "" {
+				if *app.Quadlet.UserMode {
+					app.Quadlet.Dir = defaultUserQuadletDir()
+				} else {
+					app.Quadlet.Dir = "/etc/containers/systemd"
+				}
+			}
+		} else if len(app.ComposeFiles) == 0 {
 			app.ComposeFiles = []string{"docker-compose.yml"}
 		}
 
@@ -224,6 +267,13 @@ func (c *Config) Validate() error {
 		}
 		names[app.Name] = struct{}{}
 
+		if app.Mode != ModeCompose && app.Mode != ModeQuadlet {
+			return fmt.Errorf("app %s has unsupported mode %q (expected '%s' or '%s')", app.Name, app.Mode, ModeCompose, ModeQuadlet)
+		}
+		if app.Mode == ModeQuadlet && c.Defaults.Runtime != RuntimePodman {
+			return fmt.Errorf("app %s uses mode '%s', which requires defaults.runtime: '%s'", app.Name, ModeQuadlet, RuntimePodman)
+		}
+
 		if app.Git == nil && app.Registry == nil {
 			return fmt.Errorf("app %s must specify at least one watcher: 'git' or 'registry'", app.Name)
 		}
@@ -238,4 +288,14 @@ func (c *Config) Validate() error {
 	}
 
 	return nil
+}
+
+func defaultUserQuadletDir() string {
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+		return filepath.Join(xdg, "containers", "systemd")
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		return filepath.Join(home, ".config", "containers", "systemd")
+	}
+	return "/etc/containers/systemd"
 }

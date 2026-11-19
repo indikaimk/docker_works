@@ -84,3 +84,37 @@ When `defaults.runtime: "podman"` is set:
    docker-works doctor --config ~/.config/docker-works/config.yaml
    journalctl --user -u docker-works -f
    ```
+
+## Podman Quadlets (`mode: "quadlet"`)
+
+In addition to `podman compose`, DockerWorks supports **Podman Quadlets** (Podman 4.4+), syncing `.container`, `.pod`, `.kube`, `.network`, `.volume`, `.image`, and `.build` unit files into systemd's Quadlet directory, running `systemctl daemon-reload`, restarting the generated services, and monitoring unit health for automated rollback.
+
+### Example Quadlet App Configuration
+
+```yaml
+defaults:
+  runtime: "podman"
+
+apps:
+  - name: "my-quadlet-app"
+    mode: "quadlet" # Optional if quadlet: block is present
+    quadlet:
+      # dir defaults to /etc/containers/systemd (root) or ~/.config/containers/systemd (rootless)
+      # files: ["app.network", "web.container"] # Auto-discovers quadlet files in work_dir if omitted
+      # services: ["app-network.service", "web.service"] # Auto-derived if omitted
+      # user_mode: true # Auto-detected from UID if omitted
+    git:
+      repo: "https://github.com/myorg/quadlet-infra.git"
+      branch: "main"
+      path: "apps/web"
+    auto_rollback: true
+    auto_prune: true
+```
+
+### How Quadlet Sync Works
+
+1. Syncs Quadlet unit files from `work_dir` into `<quadlet.dir>/<app.name>/` (removing stale unit files from previous commits).
+2. Pulls any `Image=` references declared in the Quadlet files using `podman pull`.
+3. Runs `systemctl [--user] daemon-reload` so Podman's Quadlet generator updates the systemd units.
+4. Restarts the generated services in dependency order (`.network`, `.volume`, `.image`, `.build`, `.pod`, `.kube`, `.container`).
+5. Monitors `systemctl [--user] show <service>` until all units are `active` (or triggers rollback if any unit enters `failed`).

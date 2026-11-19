@@ -7,10 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.2.0] - 2026-11-17
+## [0.2.0] - 2026-11-19
 
 ### Added
 - **Podman Runtime Support**: Added `defaults.runtime` (`docker` or `podman`) in `config.yaml`, automatically defaulting `compose_command` to `"podman compose"` and image pruning to `podman image prune -f`.
+- **Podman Quadlet Support**: Added `apps[].mode: "quadlet"` and `apps[].quadlet` configuration to sync `.container`, `.pod`, `.kube`, `.network`, `.volume`, `.image`, and `.build` unit files into systemd's Quadlet directory, run `systemctl [--user] daemon-reload` and `restart`, and monitor unit health with automated rollback.
 - **Podman Systemd Units**: Added `packaging/systemd/docker-works-podman.service` (rootful system unit) and `packaging/systemd/docker-works-podman-user.service` (rootless user unit), included in release archives and `.deb`/`.rpm` packages.
 - **Podman Registry Auth Fallback**: Added `auth.json` credential resolution (`$REGISTRY_AUTH_FILE`, `$XDG_RUNTIME_DIR/containers/auth.json`, `~/.config/containers/auth.json`) alongside `~/.docker/config.json`.
 - **Doctor Runtime Inspection**: Updated `docker-works doctor` to detect `defaults.runtime` from config or `--runtime docker|podman` and verify Podman CLI, `podman compose`, and `podman info`.

@@ -72,9 +72,11 @@ Each app must specify at least one watcher (`git` or `registry`) and a unique `n
 | :--- | :--- | :--- | :--- |
 | `name` | `string` | *(required)* | Unique application identifier (also used in `/webhooks/{name}`). |
 | `enabled` | `bool` | `true` | Set to `false` to disable watching/syncing this app. |
-| `work_dir` | `string` | `<state_dir>/apps/<name>` | Working directory for the compose project (relative paths resolve from config file directory). |
-| `compose_files` | `[]string` | `["docker-compose.yml"]` | Compose files passed with `-f`. |
-| `env_files` | `[]string` | `[]` | Env files passed with `--env-file`. |
+| `mode` | `string` | `"compose"` | Deployment mode: `"compose"` or `"quadlet"` (auto-defaults to `"quadlet"` if `quadlet:` is set; requires `defaults.runtime: "podman"`). |
+| `work_dir` | `string` | `<state_dir>/apps/<name>` | Working directory for the project (relative paths resolve from config file directory). |
+| `compose_files` | `[]string` | `["docker-compose.yml"]` | Compose files passed with `-f` (used in `compose` mode). |
+| `env_files` | `[]string` | `[]` | Env files passed with `--env-file` (used in `compose` mode). |
+| `quadlet` | `object` | `{}` | Optional Quadlet settings (`dir`, `files`, `services`, `user_mode`) used in `quadlet` mode. See [Podman Guide](podman.md#podman-quadlets-mode-quadlet). |
 | `auto_prune` | `bool` | `false` | Runs `<runtime> image prune -f` after a healthy deployment. |
 | `health_check_timeout` | `duration` | `defaults.health_check_timeout` | Per-app override for health check timeout. |
 | `auto_rollback` | `bool` | `defaults.auto_rollback` | Per-app override for automatic rollback. |
