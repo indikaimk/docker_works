@@ -323,3 +323,5 @@ Releases are automated via GitHub Actions and GoReleaser:
 ## 📄 License
 
 MIT License. See [LICENSE.txt](LICENSE.txt) for details.
+
+> **Disclaimer:** DockerWorks is an independent, non-commercial open-source project and is not affiliated with, sponsored by, or endorsed by Docker, Inc. "Docker" is a registered trademark of Docker, Inc.

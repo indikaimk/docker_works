@@ -2,6 +2,9 @@
 
 **DockerWorks** is a lightweight, zero-dependency GitOps and auto-update daemon for **Docker Compose** and **Podman Compose**, written in Go and designed to run as a native `systemd` service on Linux hosts.
 
+!!! note "Disclaimer"
+    DockerWorks is an independent, non-commercial open-source project and is not affiliated with, sponsored by, or endorsed by Docker, Inc. "Docker" is a registered trademark of Docker, Inc.
+
 ## Key Features
 
 - **Native Compose Engine**: Invokes `docker compose` or `podman compose` directly via `defaults.runtime` (`docker` or `podman`), supporting multiple compose files (`-f`) and `.env` files.
