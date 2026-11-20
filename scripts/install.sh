@@ -183,18 +183,32 @@ elif [ -n "$PREBUILT_BIN" ]; then
 else
   echo "   Downloading pre-compiled binary for ${OS}/${TARGET_ARCH} (v${VERSION})..."
   TMP_DIR="$(mktemp -d)"
-  TAR_URL="https://github.com/${GITHUB_REPO}/releases/download/v${VERSION}/docker-works_${VERSION}_${OS}_${TARGET_ARCH}.tar.gz"
+  TAR_FILE="docker-works_${VERSION}_${OS}_${TARGET_ARCH}.tar.gz"
+  TAR_URL="https://github.com/${GITHUB_REPO}/releases/download/v${VERSION}/${TAR_FILE}"
+  CHECKSUMS_URL="https://github.com/${GITHUB_REPO}/releases/download/v${VERSION}/checksums.txt"
 
   if command -v curl >/dev/null 2>&1; then
-    curl -fsSL "$TAR_URL" -o "${TMP_DIR}/archive.tar.gz"
+    curl -fsSL "$TAR_URL" -o "${TMP_DIR}/${TAR_FILE}"
+    if curl -fsSL "$CHECKSUMS_URL" -o "${TMP_DIR}/checksums.txt" 2>/dev/null && command -v sha256sum >/dev/null 2>&1; then
+      echo "   Verifying SHA256 checksum..."
+      (cd "$TMP_DIR" && grep " ${TAR_FILE}$" checksums.txt | sha256sum -c -)
+    else
+      echo "   Warning: Skipping SHA256 checksum verification (checksums.txt or sha256sum unavailable)."
+    fi
   elif command -v wget >/dev/null 2>&1; then
-    wget -qO "${TMP_DIR}/archive.tar.gz" "$TAR_URL"
+    wget -qO "${TMP_DIR}/${TAR_FILE}" "$TAR_URL"
+    if wget -qO "${TMP_DIR}/checksums.txt" "$CHECKSUMS_URL" 2>/dev/null && command -v sha256sum >/dev/null 2>&1; then
+      echo "   Verifying SHA256 checksum..."
+      (cd "$TMP_DIR" && grep " ${TAR_FILE}$" checksums.txt | sha256sum -c -)
+    else
+      echo "   Warning: Skipping SHA256 checksum verification (checksums.txt or sha256sum unavailable)."
+    fi
   else
     echo "   Error: curl or wget is required to download binary."
     exit 1
   fi
 
-  tar -xzf "${TMP_DIR}/archive.tar.gz" -C "$TMP_DIR"
+  tar -xzf "${TMP_DIR}/${TAR_FILE}" -C "$TMP_DIR"
   cp "${TMP_DIR}/docker-works" "${BIN_DIR}/docker-works"
 fi
 

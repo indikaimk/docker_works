@@ -3,16 +3,21 @@ package server
 import (
 	"crypto/hmac"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/indikaimk/docker_works/internal/config"
 )
+
+const maxWebhookBodyBytes = 1 << 20 // 1 MiB
 
 type TriggerFunc func(appName string) error
 
@@ -31,7 +36,13 @@ func NewServer(cfg *config.ServerConfig, apps []config.AppConfig, trigger Trigge
 
 	appMap := make(map[string]*config.AppConfig)
 	for i := range apps {
-		appMap[apps[i].Name] = &apps[i]
+		app := &apps[i]
+		appMap[app.Name] = app
+
+		hasSecret := cfg.WebhookSecret != "" || (app.Webhook != nil && app.Webhook.Secret != "")
+		if !hasSecret {
+			logger.Warn("Webhook endpoint has no secret configured; requests will be accepted without authentication", "app", app.Name, "listen", cfg.Listen)
+		}
 	}
 
 	s := &Server{
@@ -46,8 +57,12 @@ func NewServer(cfg *config.ServerConfig, apps []config.AppConfig, trigger Trigge
 	mux.HandleFunc("/webhooks/", s.handleWebhook)
 
 	s.server = &http.Server{
-		Addr:    cfg.Listen,
-		Handler: mux,
+		Addr:              cfg.Listen,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
 	return s
@@ -98,8 +113,14 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, maxWebhookBodyBytes)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			return
+		}
 		http.Error(w, "failed to read body", http.StatusBadRequest)
 		return
 	}
@@ -151,24 +172,20 @@ func verifyAuth(r *http.Request, body []byte, secret string) bool {
 		}
 	}
 
-	// 2. GitLab token: X-Gitlab-Token
+	// 2. GitLab token: X-Gitlab-Token (constant-time)
 	glToken := r.Header.Get("X-Gitlab-Token")
-	if glToken != "" && glToken == secret {
+	if glToken != "" && subtle.ConstantTimeCompare([]byte(glToken), []byte(secret)) == 1 {
 		return true
 	}
 
-	// 3. Authorization header: Bearer <secret>
+	// 3. Authorization header: Bearer <secret> (constant-time)
 	authHeader := r.Header.Get("Authorization")
 	if authHeader != "" {
 		parts := strings.SplitN(authHeader, " ", 2)
-		if len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") && parts[1] == secret {
+		if len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") &&
+			subtle.ConstantTimeCompare([]byte(parts[1]), []byte(secret)) == 1 {
 			return true
 		}
-	}
-
-	// 4. Query param ?secret=<secret>
-	if r.URL.Query().Get("secret") == secret {
-		return true
 	}
 
 	return false

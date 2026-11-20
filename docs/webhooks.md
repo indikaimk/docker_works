@@ -37,7 +37,6 @@ If `apps[].webhook.secret` or `server.webhook_secret` is configured (app-level s
 1. **GitHub HMAC-SHA256**: `X-Hub-Signature-256: sha256=<hex>`
 2. **GitLab Secret Token**: `X-Gitlab-Token: <secret>`
 3. **Bearer Token**: `Authorization: Bearer <secret>`
-4. **Query Parameter**: `?secret=<secret>`
 
 ### GitHub Setup
 

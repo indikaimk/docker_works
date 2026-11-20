@@ -49,15 +49,29 @@ func TestGetRemoteHeadCommit(t *testing.T) {
 	}
 }
 
-func TestBuildAuthRepoURL(t *testing.T) {
+func TestBuildGitEnvHTTPSAndSSH(t *testing.T) {
 	auth := &config.GitAuthConfig{
-		Token: "my-secret-token",
+		Token:      "my-secret-token",
+		SSHKeyPath: "/home/user/my key/id_ed25519",
 	}
 	raw := "https://github.com/example/repo.git"
-	res := buildAuthRepoURL(raw, auth)
+	env, err := buildGitEnv(raw, auth)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
-	if !strings.Contains(res, "x-access-token:my-secret-token@github.com") {
-		t.Errorf("expected token injected into URL, got %s", res)
+	joined := strings.Join(env, "\n")
+	if !strings.Contains(joined, "GIT_TERMINAL_PROMPT=0") {
+		t.Errorf("expected GIT_TERMINAL_PROMPT=0 in env")
+	}
+	if !strings.Contains(joined, "GIT_CONFIG_KEY_0=http.https://github.com.extraHeader") {
+		t.Errorf("expected scoped extraHeader config key, got %v", env)
+	}
+	if !strings.Contains(joined, "GIT_CONFIG_VALUE_0=Authorization: Basic ") {
+		t.Errorf("expected Basic auth header in env, got %v", env)
+	}
+	if !strings.Contains(joined, `ssh -i '/home/user/my key/id_ed25519'`) {
+		t.Errorf("expected shell-quoted ssh_key_path, got %v", env)
 	}
 }
 

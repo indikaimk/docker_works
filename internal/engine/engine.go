@@ -115,7 +115,7 @@ func (e *Engine) saveState() {
 		return
 	}
 
-	_ = os.WriteFile(e.stateFilePath(), data, 0644)
+	_ = os.WriteFile(e.stateFilePath(), data, 0600)
 }
 
 func (e *Engine) getAppState(appName string) *AppState {

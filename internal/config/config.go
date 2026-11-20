@@ -2,13 +2,18 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
+	"runtime"
 	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
 )
+
+var validAppNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
 
 type Config struct {
 	Server   ServerConfig   `yaml:"server"`
@@ -131,6 +136,12 @@ type HooksConfig struct {
 
 // Load reads and parses a YAML configuration file with environment variable expansion.
 func Load(path string) (*Config, error) {
+	if info, err := os.Stat(path); err == nil && runtime.GOOS != "windows" {
+		if perm := info.Mode().Perm(); perm&0077 != 0 {
+			slog.Warn("Configuration file has group/world permissions; consider restricting with chmod 0600", "path", path, "mode", fmt.Sprintf("%04o", perm))
+		}
+	}
+
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config file %s: %w", path, err)
@@ -262,6 +273,9 @@ func (c *Config) Validate() error {
 		if strings.TrimSpace(app.Name) == "" {
 			return fmt.Errorf("app[%d] must have a non-empty name", i)
 		}
+		if !validAppNameRe.MatchString(app.Name) || strings.Contains(app.Name, "..") {
+			return fmt.Errorf("app %q has invalid name: must match [a-zA-Z0-9][a-zA-Z0-9._-]* without '..'", app.Name)
+		}
 		if _, exists := names[app.Name]; exists {
 			return fmt.Errorf("duplicate app name: %s", app.Name)
 		}
@@ -273,13 +287,28 @@ func (c *Config) Validate() error {
 		if app.Mode == ModeQuadlet && c.Defaults.Runtime != RuntimePodman {
 			return fmt.Errorf("app %s uses mode '%s', which requires defaults.runtime: '%s'", app.Name, ModeQuadlet, RuntimePodman)
 		}
+		if app.Mode == ModeQuadlet && app.Quadlet != nil {
+			for _, qf := range app.Quadlet.Files {
+				if filepath.IsAbs(qf) || strings.Contains(qf, "..") {
+					return fmt.Errorf("app %s quadlet file %q must be a relative path without '..'", app.Name, qf)
+				}
+			}
+		}
 
 		if app.Git == nil && app.Registry == nil {
 			return fmt.Errorf("app %s must specify at least one watcher: 'git' or 'registry'", app.Name)
 		}
 
-		if app.Git != nil && strings.TrimSpace(app.Git.Repo) == "" {
-			return fmt.Errorf("app %s has git config but repo is empty", app.Name)
+		if app.Git != nil {
+			if strings.TrimSpace(app.Git.Repo) == "" {
+				return fmt.Errorf("app %s has git config but repo is empty", app.Name)
+			}
+			if strings.HasPrefix(strings.TrimSpace(app.Git.Repo), "-") {
+				return fmt.Errorf("app %s git.repo must not start with '-'", app.Name)
+			}
+			if strings.HasPrefix(strings.TrimSpace(app.Git.Branch), "-") {
+				return fmt.Errorf("app %s git.branch must not start with '-'", app.Name)
+			}
 		}
 
 		if app.Registry != nil && len(app.Registry.WatchImages) == 0 {

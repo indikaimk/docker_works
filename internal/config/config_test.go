@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -192,5 +193,41 @@ apps:
 	}
 	if _, err := Load(badCfgPath); err == nil {
 		t.Fatalf("expected validation error for quadlet mode with docker runtime")
+	}
+}
+
+func TestSecurityValidation(t *testing.T) {
+	tempDir := t.TempDir()
+
+	cases := []struct {
+		name string
+		yaml string
+	}{
+		{
+			name: "path traversal in app name",
+			yaml: "apps:\n  - name: \"../evil\"\n    git:\n      repo: \"https://github.com/example/repo.git\"\n",
+		},
+		{
+			name: "slash in app name",
+			yaml: "apps:\n  - name: \"foo/bar\"\n    git:\n      repo: \"https://github.com/example/repo.git\"\n",
+		},
+		{
+			name: "git repo flag injection",
+			yaml: "apps:\n  - name: \"app1\"\n    git:\n      repo: \"--upload-pack=evil\"\n",
+		},
+		{
+			name: "git branch flag injection",
+			yaml: "apps:\n  - name: \"app1\"\n    git:\n      repo: \"https://github.com/example/repo.git\"\n      branch: \"--evil\"\n",
+		},
+	}
+
+	for _, tc := range cases {
+		cfgPath := filepath.Join(tempDir, strings.ReplaceAll(tc.name, " ", "_")+".yaml")
+		if err := os.WriteFile(cfgPath, []byte(tc.yaml), 0644); err != nil {
+			t.Fatalf("failed to write test config: %v", err)
+		}
+		if _, err := Load(cfgPath); err == nil {
+			t.Errorf("%s: expected validation error, got nil", tc.name)
+		}
 	}
 }

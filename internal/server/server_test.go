@@ -72,4 +72,21 @@ func TestWebhookAuth(t *testing.T) {
 	mu.Lock()
 	_ = triggered
 	mu.Unlock()
+
+	// 3. Reject oversized payload (> 1 MiB)
+	oversized := strings.Repeat("a", maxWebhookBodyBytes+10)
+	req3 := httptest.NewRequest(http.MethodPost, "/webhooks/my-app", strings.NewReader(oversized))
+	w3 := httptest.NewRecorder()
+	srv.handleWebhook(w3, req3)
+	if w3.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("expected 413 payload too large, got %d", w3.Code)
+	}
+
+	// 4. Reject query-string secret
+	req4 := httptest.NewRequest(http.MethodPost, "/webhooks/my-app?secret=secret123", strings.NewReader(`{}`))
+	w4 := httptest.NewRecorder()
+	srv.handleWebhook(w4, req4)
+	if w4.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 for query-string secret, got %d", w4.Code)
+	}
 }
