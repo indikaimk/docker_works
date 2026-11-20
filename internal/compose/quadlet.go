@@ -28,8 +28,11 @@ func isQuadletFile(name string) bool {
 	return ok
 }
 
-func discoverQuadletFiles(workDir string, explicit []string) ([]string, error) {
-	var files []string
+func isTimerFile(name string) bool {
+	return strings.EqualFold(filepath.Ext(name), ".timer")
+}
+
+func discoverQuadletFiles(workDir string, explicit []string) (quadletFiles []string, timerFiles []string, err error) {
 	if len(explicit) > 0 {
 		for _, f := range explicit {
 			p := f
@@ -37,39 +40,49 @@ func discoverQuadletFiles(workDir string, explicit []string) ([]string, error) {
 				p = filepath.Join(workDir, f)
 			}
 			if _, err := os.Stat(p); err != nil {
-				return nil, fmt.Errorf("quadlet file %q not found: %w", f, err)
+				return nil, nil, fmt.Errorf("quadlet file %q not found: %w", f, err)
 			}
-			files = append(files, p)
+			if isTimerFile(p) {
+				timerFiles = append(timerFiles, p)
+			} else {
+				quadletFiles = append(quadletFiles, p)
+			}
 		}
 	} else {
 		entries, err := os.ReadDir(workDir)
 		if err != nil {
-			return nil, fmt.Errorf("failed to read quadlet work_dir %s: %w", workDir, err)
+			return nil, nil, fmt.Errorf("failed to read quadlet work_dir %s: %w", workDir, err)
 		}
 		for _, entry := range entries {
 			if entry.IsDir() {
 				continue
 			}
-			if isQuadletFile(entry.Name()) {
-				files = append(files, filepath.Join(workDir, entry.Name()))
+			name := entry.Name()
+			if isTimerFile(name) {
+				timerFiles = append(timerFiles, filepath.Join(workDir, name))
+			} else if isQuadletFile(name) {
+				quadletFiles = append(quadletFiles, filepath.Join(workDir, name))
 			}
 		}
 	}
 
-	if len(files) == 0 {
-		return nil, fmt.Errorf("no quadlet files (*.container, *.pod, *.kube, *.network, *.volume, *.image, *.build) found in %s", workDir)
+	if len(quadletFiles) == 0 && len(timerFiles) == 0 {
+		return nil, nil, fmt.Errorf("no quadlet or timer files (*.container, *.pod, *.kube, *.network, *.volume, *.image, *.build, *.timer) found in %s", workDir)
 	}
 
-	sort.Slice(files, func(i, j int) bool {
-		ei := quadletExtOrder[strings.ToLower(filepath.Ext(files[i]))]
-		ej := quadletExtOrder[strings.ToLower(filepath.Ext(files[j]))]
+	sort.Slice(quadletFiles, func(i, j int) bool {
+		ei := quadletExtOrder[strings.ToLower(filepath.Ext(quadletFiles[i]))]
+		ej := quadletExtOrder[strings.ToLower(filepath.Ext(quadletFiles[j]))]
 		if ei != ej {
 			return ei < ej
 		}
-		return filepath.Base(files[i]) < filepath.Base(files[j])
+		return filepath.Base(quadletFiles[i]) < filepath.Base(quadletFiles[j])
+	})
+	sort.Slice(timerFiles, func(i, j int) bool {
+		return filepath.Base(timerFiles[i]) < filepath.Base(timerFiles[j])
 	})
 
-	return files, nil
+	return quadletFiles, timerFiles, nil
 }
 
 func parseQuadletMetadata(filePath string) (serviceName string, images []string) {
@@ -129,7 +142,35 @@ func deriveQuadletServiceName(filePath string, explicitServiceName string) strin
 	}
 }
 
-func resolveQuadletPlan(app *config.AppConfig) (files []string, services []string, images []string, err error) {
+func parseTimerTarget(filePath string) string {
+	data, err := os.ReadFile(filePath)
+	if err == nil {
+		for _, line := range strings.Split(string(data), "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") || strings.HasPrefix(line, "[") {
+				continue
+			}
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) == 2 && strings.TrimSpace(parts[0]) == "Unit" {
+				if val := strings.TrimSpace(parts[1]); val != "" {
+					return val
+				}
+			}
+		}
+	}
+	base := filepath.Base(filePath)
+	return strings.TrimSuffix(base, filepath.Ext(base)) + ".service"
+}
+
+type quadletPlan struct {
+	quadletFiles []string
+	timerFiles   []string
+	services     []string
+	timers       []string
+	images       []string
+}
+
+func resolveQuadletPlan(app *config.AppConfig) (*quadletPlan, error) {
 	var explicitFiles []string
 	var explicitServices []string
 	if app.Quadlet != nil {
@@ -137,41 +178,59 @@ func resolveQuadletPlan(app *config.AppConfig) (files []string, services []strin
 		explicitServices = app.Quadlet.Services
 	}
 
-	files, err = discoverQuadletFiles(app.WorkDir, explicitFiles)
+	quadletFiles, timerFiles, err := discoverQuadletFiles(app.WorkDir, explicitFiles)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, err
+	}
+
+	plan := &quadletPlan{
+		quadletFiles: quadletFiles,
+		timerFiles:   timerFiles,
+	}
+
+	timerOwnedServices := make(map[string]struct{})
+	for _, tf := range timerFiles {
+		plan.timers = append(plan.timers, filepath.Base(tf))
+		timerOwnedServices[parseTimerTarget(tf)] = struct{}{}
 	}
 
 	seenImg := make(map[string]struct{})
 	seenSvc := make(map[string]struct{})
 
-	for _, f := range files {
+	for _, f := range quadletFiles {
 		svcOverride, imgs := parseQuadletMetadata(f)
 		for _, img := range imgs {
 			if _, ok := seenImg[img]; !ok {
 				seenImg[img] = struct{}{}
-				images = append(images, img)
+				plan.images = append(plan.images, img)
 			}
 		}
 		if len(explicitServices) == 0 {
 			svc := deriveQuadletServiceName(f, svcOverride)
+			if _, ownedByTimer := timerOwnedServices[svc]; ownedByTimer {
+				continue
+			}
 			if _, ok := seenSvc[svc]; !ok {
 				seenSvc[svc] = struct{}{}
-				services = append(services, svc)
+				plan.services = append(plan.services, svc)
 			}
 		}
 	}
 
 	if len(explicitServices) > 0 {
 		for _, s := range explicitServices {
-			if !strings.HasSuffix(s, ".service") {
+			if !strings.HasSuffix(s, ".service") && !strings.HasSuffix(s, ".timer") {
 				s += ".service"
 			}
-			services = append(services, s)
+			if strings.HasSuffix(s, ".timer") {
+				plan.timers = append(plan.timers, s)
+			} else {
+				plan.services = append(plan.services, s)
+			}
 		}
 	}
 
-	return files, services, images, nil
+	return plan, nil
 }
 
 func syncQuadletFiles(app *config.AppConfig, files []string) error {
@@ -203,6 +262,34 @@ func syncQuadletFiles(app *config.AppConfig, files []string) error {
 	return nil
 }
 
+func syncTimerFiles(app *config.AppConfig, timerFiles []string) error {
+	if len(timerFiles) == 0 {
+		return nil
+	}
+	systemdDir := app.Quadlet.SystemdDir
+	if systemdDir == "" {
+		if app.Quadlet.IsUserMode() {
+			systemdDir = filepath.Join(os.Getenv("HOME"), ".config", "systemd", "user")
+		} else {
+			systemdDir = "/etc/systemd/system"
+		}
+	}
+	if err := os.MkdirAll(systemdDir, 0755); err != nil {
+		return fmt.Errorf("failed to create systemd unit dir %s: %w", systemdDir, err)
+	}
+	for _, src := range timerFiles {
+		data, err := os.ReadFile(src)
+		if err != nil {
+			return fmt.Errorf("failed to read timer file %s: %w", src, err)
+		}
+		dst := filepath.Join(systemdDir, filepath.Base(src))
+		if err := os.WriteFile(dst, data, 0644); err != nil {
+			return fmt.Errorf("failed to write timer file %s: %w", dst, err)
+		}
+	}
+	return nil
+}
+
 func systemctlArgs(userMode bool, args ...string) []string {
 	if userMode {
 		return append([]string{"--user"}, args...)
@@ -210,7 +297,10 @@ func systemctlArgs(userMode bool, args ...string) []string {
 	return args
 }
 
-func (s *Service) waitForQuadletHealth(ctx context.Context, app *config.AppConfig, userMode bool, services []string, timeout time.Duration) error {
+func (s *Service) waitForQuadletHealth(ctx context.Context, app *config.AppConfig, userMode bool, units []string, timeout time.Duration) error {
+	if len(units) == 0 {
+		return nil
+	}
 	if timeout <= 0 {
 		timeout = 60 * time.Second
 	}
@@ -232,34 +322,39 @@ func (s *Service) waitForQuadletHealth(ctx context.Context, app *config.AppConfi
 			return fmt.Errorf("quadlet health check timed out after %v", timeout)
 		}
 
-		allActive := true
-		for _, svc := range services {
-			args := systemctlArgs(userMode, "show", svc, "--property=ActiveState,SubState,Result", "--value")
+		allHealthy := true
+		for _, unit := range units {
+			args := systemctlArgs(userMode, "show", unit, "--property=Type,ActiveState,SubState,Result", "--value")
 			out, err := s.runner.Run(ctx, app.WorkDir, nil, "systemctl", args...)
 			if err != nil {
-				allActive = false
+				allHealthy = false
 				continue
 			}
 
 			lines := strings.Split(strings.TrimSpace(out), "\n")
-			if len(lines) < 3 {
-				allActive = false
+			if len(lines) < 4 {
+				allHealthy = false
 				continue
 			}
-			activeState := strings.TrimSpace(lines[0])
-			subState := strings.TrimSpace(lines[1])
-			result := strings.TrimSpace(lines[2])
+			unitType := strings.TrimSpace(lines[0])
+			activeState := strings.TrimSpace(lines[1])
+			subState := strings.TrimSpace(lines[2])
+			result := strings.TrimSpace(lines[3])
 
 			if activeState == "failed" || (activeState == "inactive" && result != "" && result != "success") {
-				return fmt.Errorf("quadlet unit %s failed (active=%s, sub=%s, result=%s)", svc, activeState, subState, result)
+				return fmt.Errorf("quadlet unit %s failed (active=%s, sub=%s, result=%s)", unit, activeState, subState, result)
+			}
+			// Completed oneshot batch tasks transition to inactive with Result=success.
+			if unitType == "oneshot" && activeState == "inactive" && result == "success" {
+				continue
 			}
 			if activeState != "active" {
-				allActive = false
+				allHealthy = false
 			}
 		}
 
-		if allActive {
-			s.logger.Info("All quadlet units reported active", "app", app.Name, "services", services)
+		if allHealthy {
+			s.logger.Info("All quadlet units reported healthy/active", "app", app.Name, "units", units)
 			return nil
 		}
 
@@ -272,13 +367,13 @@ func (s *Service) waitForQuadletHealth(ctx context.Context, app *config.AppConfi
 }
 
 func (s *Service) applyQuadletUnits(ctx context.Context, app *config.AppConfig, pullImages bool) error {
-	files, services, images, err := resolveQuadletPlan(app)
+	plan, err := resolveQuadletPlan(app)
 	if err != nil {
 		return err
 	}
 
-	if pullImages && len(images) > 0 {
-		for _, img := range images {
+	if pullImages && len(plan.images) > 0 {
+		for _, img := range plan.images {
 			s.logger.Info("Pulling quadlet image", "app", app.Name, "image", img)
 			if out, err := s.runner.Run(ctx, app.WorkDir, nil, "podman", "pull", img); err != nil {
 				s.logger.Warn("podman pull returned error (might be using local image)", "app", app.Name, "image", img, "output", out, "error", err)
@@ -286,8 +381,11 @@ func (s *Service) applyQuadletUnits(ctx context.Context, app *config.AppConfig, 
 		}
 	}
 
-	s.logger.Info("Syncing quadlet files", "app", app.Name, "target_dir", filepath.Join(app.Quadlet.Dir, app.Name), "count", len(files))
-	if err := syncQuadletFiles(app, files); err != nil {
+	s.logger.Info("Syncing quadlet files", "app", app.Name, "target_dir", filepath.Join(app.Quadlet.Dir, app.Name), "count", len(plan.quadletFiles))
+	if err := syncQuadletFiles(app, plan.quadletFiles); err != nil {
+		return err
+	}
+	if err := syncTimerFiles(app, plan.timerFiles); err != nil {
 		return err
 	}
 
@@ -298,13 +396,29 @@ func (s *Service) applyQuadletUnits(ctx context.Context, app *config.AppConfig, 
 		return fmt.Errorf("systemctl daemon-reload failed: %w, output: %s", err, out)
 	}
 
-	restartArgs := systemctlArgs(userMode, append([]string{"restart"}, services...)...)
-	s.logger.Info("Restarting quadlet units", "app", app.Name, "services", services)
-	if out, err := s.runner.Run(ctx, app.WorkDir, nil, "systemctl", restartArgs...); err != nil {
-		return fmt.Errorf("systemctl restart failed: %w, output: %s", err, out)
+	if len(plan.services) > 0 {
+		restartArgs := systemctlArgs(userMode, append([]string{"restart"}, plan.services...)...)
+		s.logger.Info("Restarting quadlet units", "app", app.Name, "services", plan.services)
+		if out, err := s.runner.Run(ctx, app.WorkDir, nil, "systemctl", restartArgs...); err != nil {
+			return fmt.Errorf("systemctl restart failed: %w, output: %s", err, out)
+		}
 	}
 
-	return s.waitForQuadletHealth(ctx, app, userMode, services, app.HealthCheckTimeout)
+	if len(plan.timers) > 0 {
+		enableArgs := systemctlArgs(userMode, append([]string{"enable", "--now"}, plan.timers...)...)
+		s.logger.Info("Enabling quadlet timer units", "app", app.Name, "timers", plan.timers)
+		if out, err := s.runner.Run(ctx, app.WorkDir, nil, "systemctl", enableArgs...); err != nil {
+			return fmt.Errorf("systemctl enable timers failed: %w, output: %s", err, out)
+		}
+		restartTimerArgs := systemctlArgs(userMode, append([]string{"restart"}, plan.timers...)...)
+		if out, err := s.runner.Run(ctx, app.WorkDir, nil, "systemctl", restartTimerArgs...); err != nil {
+			return fmt.Errorf("systemctl restart timers failed: %w, output: %s", err, out)
+		}
+	}
+
+	unitsToCheck := append([]string{}, plan.services...)
+	unitsToCheck = append(unitsToCheck, plan.timers...)
+	return s.waitForQuadletHealth(ctx, app, userMode, unitsToCheck, app.HealthCheckTimeout)
 }
 
 func (s *Service) deployQuadlet(ctx context.Context, app *config.AppConfig) error {

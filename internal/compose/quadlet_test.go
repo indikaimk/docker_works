@@ -22,7 +22,7 @@ func (m *quadletMockRunner) Run(ctx context.Context, dir string, env []string, n
 
 	if name == "systemctl" {
 		for _, a := range args {
-			if strings.HasSuffix(a, ".service") {
+			if strings.HasSuffix(a, ".service") || strings.HasSuffix(a, ".timer") {
 				if out, ok := m.showOutputs[a]; ok {
 					return out, nil
 				}
@@ -30,7 +30,7 @@ func (m *quadletMockRunner) Run(ctx context.Context, dir string, env []string, n
 		}
 		for _, a := range args {
 			if a == "show" {
-				return "active\nrunning\nsuccess\n", nil
+				return "simple\nactive\nrunning\nsuccess\n", nil
 			}
 		}
 	}
@@ -111,8 +111,8 @@ func TestQuadletDeploySuccess(t *testing.T) {
 		"podman pull ghcr.io/myorg/web:latest",
 		"systemctl --user daemon-reload",
 		"systemctl --user restart app-network.service web.service",
-		"systemctl --user show app-network.service --property=ActiveState,SubState,Result --value",
-		"systemctl --user show web.service --property=ActiveState,SubState,Result --value",
+		"systemctl --user show app-network.service --property=Type,ActiveState,SubState,Result --value",
+		"systemctl --user show web.service --property=Type,ActiveState,SubState,Result --value",
 		"/bin/sh -c echo post",
 		"podman image prune -f",
 	}
@@ -157,7 +157,7 @@ func TestQuadletDeployFailedUnit(t *testing.T) {
 
 	runner := &quadletMockRunner{
 		showOutputs: map[string]string{
-			"web.service": "failed\nfailed\nexit-code\n",
+			"web.service": "simple\nfailed\nfailed\nexit-code\n",
 		},
 	}
 	service := NewService(runner, nil)
@@ -168,5 +168,91 @@ func TestQuadletDeployFailedUnit(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "web.service failed") {
 		t.Errorf("expected error mentioning web.service failed, got %v", err)
+	}
+}
+
+func TestQuadletBatchOneshotSuccess(t *testing.T) {
+	workDir := t.TempDir()
+	quadletDir := t.TempDir()
+
+	if err := os.WriteFile(filepath.Join(workDir, "migrate.container"), []byte("[Service]\nType=oneshot\n[Container]\nImage=ghcr.io/myorg/migrate:latest\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	userMode := true
+	app := &config.AppConfig{
+		Name:               "batch-migrate",
+		Mode:               config.ModeQuadlet,
+		WorkDir:            workDir,
+		HealthCheckTimeout: 2 * time.Second,
+		Quadlet: &config.QuadletConfig{
+			Dir:      quadletDir,
+			UserMode: &userMode,
+		},
+	}
+
+	runner := &quadletMockRunner{
+		showOutputs: map[string]string{
+			"migrate.service": "oneshot\ninactive\ndead\nsuccess\n",
+		},
+	}
+	service := NewService(runner, nil)
+
+	if err := service.Deploy(context.Background(), app, "podman compose"); err != nil {
+		t.Fatalf("expected completed oneshot batch task to succeed, got: %v", err)
+	}
+}
+
+func TestQuadletTimerBatchJob(t *testing.T) {
+	workDir := t.TempDir()
+	quadletDir := t.TempDir()
+	systemdDir := t.TempDir()
+
+	if err := os.WriteFile(filepath.Join(workDir, "backup.container"), []byte("[Service]\nType=oneshot\n[Container]\nImage=ghcr.io/myorg/backup:latest\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workDir, "backup.timer"), []byte("[Timer]\nOnCalendar=daily\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	userMode := true
+	app := &config.AppConfig{
+		Name:               "nightly-backup",
+		Mode:               config.ModeQuadlet,
+		WorkDir:            workDir,
+		HealthCheckTimeout: 2 * time.Second,
+		Quadlet: &config.QuadletConfig{
+			Dir:        quadletDir,
+			SystemdDir: systemdDir,
+			UserMode:   &userMode,
+		},
+	}
+
+	runner := &quadletMockRunner{}
+	service := NewService(runner, nil)
+
+	if err := service.Deploy(context.Background(), app, "podman compose"); err != nil {
+		t.Fatalf("expected timer batch deploy to succeed, got: %v", err)
+	}
+
+	expectedSeq := []string{
+		"podman pull ghcr.io/myorg/backup:latest",
+		"systemctl --user daemon-reload",
+		"systemctl --user enable --now backup.timer",
+		"systemctl --user restart backup.timer",
+		"systemctl --user show backup.timer --property=Type,ActiveState,SubState,Result --value",
+	}
+
+	if len(runner.commands) != len(expectedSeq) {
+		t.Fatalf("expected %d commands, got %d:\n%v", len(expectedSeq), len(runner.commands), runner.commands)
+	}
+	for i, exp := range expectedSeq {
+		if runner.commands[i] != exp {
+			t.Errorf("step %d: expected %q, got %q", i, exp, runner.commands[i])
+		}
+	}
+
+	if _, err := os.Stat(filepath.Join(systemdDir, "backup.timer")); err != nil {
+		t.Errorf("expected backup.timer to be synced to %s: %v", systemdDir, err)
 	}
 }

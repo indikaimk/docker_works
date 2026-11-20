@@ -113,8 +113,8 @@ apps:
 
 ### How Quadlet Sync Works
 
-1. Syncs Quadlet unit files from `work_dir` into `<quadlet.dir>/<app.name>/` (removing stale unit files from previous commits).
+1. Syncs Quadlet unit files from `work_dir` into `<quadlet.dir>/<app.name>/` (removing stale unit files from previous commits), and syncs any `.timer` files into `quadlet.systemd_dir` (`/etc/systemd/system` or `~/.config/systemd/user`).
 2. Pulls any `Image=` references declared in the Quadlet files using `podman pull`.
 3. Runs `systemctl [--user] daemon-reload` so Podman's Quadlet generator updates the systemd units.
-4. Restarts the generated services in dependency order (`.network`, `.volume`, `.image`, `.build`, `.pod`, `.kube`, `.container`).
-5. Monitors `systemctl [--user] show <service>` until all units are `active` (or triggers rollback if any unit enters `failed`).
+4. Restarts long-running and standalone `Type=oneshot` services in dependency order (`.network`, `.volume`, `.image`, `.build`, `.pod`, `.kube`, `.container`), and enables/restarts `.timer` units without immediately firing their target batch `.service`.
+5. Monitors `systemctl [--user] show <unit>` until units are `active` (or `inactive` with `Result=success` for `Type=oneshot` batch tasks), triggering rollback if any unit enters `failed`.

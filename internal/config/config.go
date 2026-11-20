@@ -22,9 +22,10 @@ type Config struct {
 }
 
 type ServerConfig struct {
-	Enabled       bool   `yaml:"enabled"`
-	Listen        string `yaml:"listen"`
-	WebhookSecret string `yaml:"webhook_secret"`
+	Enabled        bool   `yaml:"enabled"`
+	Listen         string `yaml:"listen"`
+	WebhookSecret  string `yaml:"webhook_secret"`
+	MetricsEnabled bool   `yaml:"metrics_enabled"`
 }
 
 const (
@@ -70,10 +71,11 @@ type AppConfig struct {
 }
 
 type QuadletConfig struct {
-	Dir      string   `yaml:"dir"`
-	Files    []string `yaml:"files"`
-	Services []string `yaml:"services"`
-	UserMode *bool    `yaml:"user_mode"`
+	Dir        string   `yaml:"dir"`
+	SystemdDir string   `yaml:"systemd_dir"`
+	Files      []string `yaml:"files"`
+	Services   []string `yaml:"services"`
+	UserMode   *bool    `yaml:"user_mode"`
 }
 
 func (q *QuadletConfig) IsUserMode() bool {
@@ -224,6 +226,13 @@ func (c *Config) applyDefaults(configDir string) {
 					app.Quadlet.Dir = "/etc/containers/systemd"
 				}
 			}
+			if app.Quadlet.SystemdDir == "" {
+				if *app.Quadlet.UserMode {
+					app.Quadlet.SystemdDir = defaultUserSystemdDir()
+				} else {
+					app.Quadlet.SystemdDir = "/etc/systemd/system"
+				}
+			}
 		} else if len(app.ComposeFiles) == 0 {
 			app.ComposeFiles = []string{"docker-compose.yml"}
 		}
@@ -327,4 +336,14 @@ func defaultUserQuadletDir() string {
 		return filepath.Join(home, ".config", "containers", "systemd")
 	}
 	return "/etc/containers/systemd"
+}
+
+func defaultUserSystemdDir() string {
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+		return filepath.Join(xdg, "systemd", "user")
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		return filepath.Join(home, ".config", "systemd", "user")
+	}
+	return "/etc/systemd/system"
 }
