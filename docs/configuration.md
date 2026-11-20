@@ -51,6 +51,7 @@ apps:
 | `enabled` | `bool` | `false` | Enables the HTTP server for `/healthz` and `/webhooks/{app}`. |
 | `listen` | `string` | `"127.0.0.1:8080"` | Address and port to bind. |
 | `webhook_secret` | `string` | `""` | Default webhook secret used when an app does not define `webhook.secret`. |
+| `metrics_enabled` | `bool` | `false` | Exposes Prometheus metrics at `GET /metrics` on `server.listen`. |
 
 ### `defaults`
 

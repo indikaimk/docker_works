@@ -51,3 +51,22 @@ If `apps[].webhook.secret` or `server.webhook_secret` is configured (app-level s
 curl -X POST "http://127.0.0.1:8080/webhooks/my-app" \
   -H "Authorization: Bearer my-webhook-secret"
 ```
+
+## Prometheus Metrics Endpoint
+
+When `server.enabled: true` and `server.metrics_enabled: true` are set, DockerWorks exposes Prometheus metrics in text exposition format at:
+
+```http
+GET /metrics
+```
+
+Exported metrics:
+- `docker_works_deployments_total{app,trigger,status}`
+- `docker_works_rollbacks_total{app}`
+- `docker_works_poll_errors_total{app,watcher}`
+- `docker_works_last_deploy_success{app}`
+- `docker_works_last_deploy_timestamp_seconds{app}`
+- `docker_works_last_deployment_duration_seconds{app}`
+
+!!! tip "Keep `/metrics` internal"
+    If you reverse-proxy `/webhooks/` to the public internet, only proxy `/webhooks/` and scrape `http://127.0.0.1:8080/metrics` locally from Prometheus.

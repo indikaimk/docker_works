@@ -13,6 +13,7 @@ import (
 	"github.com/indikaimk/docker_works/internal/compose"
 	"github.com/indikaimk/docker_works/internal/config"
 	"github.com/indikaimk/docker_works/internal/gitops"
+	"github.com/indikaimk/docker_works/internal/metrics"
 	"github.com/indikaimk/docker_works/internal/registry"
 	"github.com/indikaimk/docker_works/internal/server"
 )
@@ -41,6 +42,7 @@ type Engine struct {
 	composeService  *compose.Service
 	gitSyncer       *gitops.Syncer
 	registryChecker registry.DigestChecker
+	metrics         *metrics.Registry
 	logger          *slog.Logger
 
 	appLocks map[string]*sync.Mutex
@@ -70,6 +72,7 @@ func NewEngine(
 		composeService:  composeService,
 		gitSyncer:       gitSyncer,
 		registryChecker: registryChecker,
+		metrics:         metrics.NewRegistry(),
 		logger:          logger,
 		appLocks:        appLocks,
 		stateDir:        cfg.Defaults.StateDir,
@@ -153,6 +156,7 @@ func (e *Engine) CheckAndDeployGit(ctx context.Context, app *config.AppConfig) (
 
 	remoteCommit, err := e.gitSyncer.GetRemoteHeadCommit(ctx, app.Git)
 	if err != nil {
+		e.metrics.RecordPollError(app.Name, "git")
 		return false, fmt.Errorf("failed to check remote git commit for %s: %w", app.Name, err)
 	}
 
@@ -182,8 +186,11 @@ func (e *Engine) CheckAndDeployGit(ctx context.Context, app *config.AppConfig) (
 	}
 
 	// Deploy and verify health
+	deployStart := time.Now()
 	deployErr := e.composeService.Deploy(ctx, app, e.cfg.Defaults.ComposeCommand)
+	deployDur := time.Since(deployStart)
 	if deployErr != nil {
+		e.metrics.RecordDeploy(app.Name, "git", "failure", deployDur)
 		appState.LastFailedCommit = remoteCommit
 
 		autoRollback := app.IsAutoRollbackEnabled(e.cfg.Defaults.IsAutoRollbackEnabled())
@@ -207,6 +214,7 @@ func (e *Engine) CheckAndDeployGit(ctx context.Context, app *config.AppConfig) (
 				Reason:    deployErr.Error(),
 				Target:    previousCommit,
 			}
+			e.metrics.RecordRollback(app.Name)
 			e.saveState()
 
 			e.logger.Info("Automated rollback succeeded, app restored to previous working commit", "app", app.Name, "commit", previousCommit)
@@ -223,6 +231,7 @@ func (e *Engine) CheckAndDeployGit(ctx context.Context, app *config.AppConfig) (
 	appState.LastGitCommit = syncedCommit
 	appState.LastFailedCommit = ""
 	appState.LastDeployed = time.Now()
+	e.metrics.RecordDeploy(app.Name, "git", "success", deployDur)
 	e.saveState()
 
 	return true, nil
@@ -244,6 +253,7 @@ func (e *Engine) CheckAndDeployRegistry(ctx context.Context, app *config.AppConf
 	for _, imageRef := range app.Registry.WatchImages {
 		remoteDigest, err := e.registryChecker.GetRemoteDigest(ctx, imageRef, app.Registry.Auth)
 		if err != nil {
+			e.metrics.RecordPollError(app.Name, "registry")
 			e.logger.Warn("Failed to check remote digest", "app", app.Name, "image", imageRef, "error", err)
 			continue
 		}
@@ -271,8 +281,11 @@ func (e *Engine) CheckAndDeployRegistry(ctx context.Context, app *config.AppConf
 	}
 
 	// Deploy compose
+	deployStart := time.Now()
 	deployErr := e.composeService.Deploy(ctx, app, e.cfg.Defaults.ComposeCommand)
+	deployDur := time.Since(deployStart)
 	if deployErr != nil {
+		e.metrics.RecordDeploy(app.Name, "registry", "failure", deployDur)
 		for _, img := range changedImages {
 			appState.LastFailedDigests[img] = "failed"
 		}
@@ -290,6 +303,7 @@ func (e *Engine) CheckAndDeployRegistry(ctx context.Context, app *config.AppConf
 				Reason:    deployErr.Error(),
 				Target:    "previous container state",
 			}
+			e.metrics.RecordRollback(app.Name)
 			e.saveState()
 			return false, fmt.Errorf("deployment failed healthcheck: %v (automatically rolled back to previous state)", deployErr)
 		}
@@ -307,6 +321,7 @@ func (e *Engine) CheckAndDeployRegistry(ctx context.Context, app *config.AppConf
 	}
 
 	appState.LastDeployed = time.Now()
+	e.metrics.RecordDeploy(app.Name, "registry", "success", deployDur)
 	e.saveState()
 
 	return true, nil
@@ -350,8 +365,11 @@ func (e *Engine) SyncApp(ctx context.Context, appName string) error {
 		syncedCommit = commit
 	}
 
+	deployStart := time.Now()
 	deployErr := e.composeService.Deploy(ctx, targetApp, e.cfg.Defaults.ComposeCommand)
+	deployDur := time.Since(deployStart)
 	if deployErr != nil {
+		e.metrics.RecordDeploy(appName, "manual", "failure", deployDur)
 		autoRollback := targetApp.IsAutoRollbackEnabled(e.cfg.Defaults.IsAutoRollbackEnabled())
 		if autoRollback && previousCommit != "" && targetApp.Git != nil {
 			e.logger.Error("Manual sync failed health check; triggering automated rollback", "app", appName, "rollback_commit", previousCommit, "error", deployErr)
@@ -362,6 +380,7 @@ func (e *Engine) SyncApp(ctx context.Context, appName string) error {
 				Reason:    deployErr.Error(),
 				Target:    previousCommit,
 			}
+			e.metrics.RecordRollback(appName)
 			e.saveState()
 			return fmt.Errorf("deployment failed healthcheck: %v (automatically rolled back to commit %s)", deployErr, previousCommit)
 		}
@@ -372,6 +391,7 @@ func (e *Engine) SyncApp(ctx context.Context, appName string) error {
 		appState.LastGitCommit = syncedCommit
 	}
 	appState.LastDeployed = time.Now()
+	e.metrics.RecordDeploy(appName, "manual", "success", deployDur)
 	e.saveState()
 	return nil
 }
@@ -387,6 +407,7 @@ func (e *Engine) Start(ctx context.Context) error {
 		srv := server.NewServer(&e.cfg.Server, e.cfg.Apps, func(appName string) error {
 			return e.SyncApp(ctx, appName)
 		}, e.logger)
+		srv.RegisterMetrics(e.metrics)
 
 		wg.Add(1)
 		go func() {

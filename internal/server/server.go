@@ -26,6 +26,7 @@ type Server struct {
 	apps    map[string]*config.AppConfig
 	trigger TriggerFunc
 	logger  *slog.Logger
+	mux     *http.ServeMux
 	server  *http.Server
 }
 
@@ -55,6 +56,7 @@ func NewServer(cfg *config.ServerConfig, apps []config.AppConfig, trigger Trigge
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.handleHealthz)
 	mux.HandleFunc("/webhooks/", s.handleWebhook)
+	s.mux = mux
 
 	s.server = &http.Server{
 		Addr:              cfg.Listen,
@@ -66,6 +68,12 @@ func NewServer(cfg *config.ServerConfig, apps []config.AppConfig, trigger Trigge
 	}
 
 	return s
+}
+
+func (s *Server) RegisterMetrics(h http.Handler) {
+	if s.cfg.MetricsEnabled && h != nil && s.mux != nil {
+		s.mux.Handle("/metrics", h)
+	}
 }
 
 func (s *Server) Start() error {
