@@ -219,6 +219,10 @@ func TestSecurityValidation(t *testing.T) {
 			name: "git branch flag injection",
 			yaml: "apps:\n  - name: \"app1\"\n    git:\n      repo: \"https://github.com/example/repo.git\"\n      branch: \"--evil\"\n",
 		},
+		{
+			name: "git path traversal",
+			yaml: "apps:\n  - name: \"app1\"\n    git:\n      repo: \"https://github.com/example/repo.git\"\n      path: \"../outside\"\n",
+		},
 	}
 
 	for _, tc := range cases {

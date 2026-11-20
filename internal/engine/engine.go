@@ -142,6 +142,15 @@ func (e *Engine) getAppState(appName string) *AppState {
 	return appState
 }
 
+func appWithEffectiveWorkDir(app *config.AppConfig) *config.AppConfig {
+	if app.Git == nil || app.Git.Path == "" || app.Git.Path == "." {
+		return app
+	}
+	copyApp := *app
+	copyApp.WorkDir = filepath.Join(app.WorkDir, app.Git.Path)
+	return &copyApp
+}
+
 // CheckAndDeployGit checks if git commit changed, updates local repo, deploys, and automatically rolls back if health checks fail.
 func (e *Engine) CheckAndDeployGit(ctx context.Context, app *config.AppConfig) (bool, error) {
 	if app.Git == nil {
@@ -174,11 +183,9 @@ func (e *Engine) CheckAndDeployGit(ctx context.Context, app *config.AppConfig) (
 
 	previousCommit := appState.LastGitCommit
 
-	// Target directory for git clone/checkout
+	// Clone/sync the Git repository into app.WorkDir, and run deploy from app.WorkDir/<git.path>.
 	targetRepoDir := app.WorkDir
-	if app.Git.Path != "" && app.Git.Path != "." {
-		targetRepoDir = filepath.Dir(app.WorkDir)
-	}
+	deployApp := appWithEffectiveWorkDir(app)
 
 	syncedCommit, err := e.gitSyncer.Sync(ctx, targetRepoDir, app.Git)
 	if err != nil {
@@ -187,7 +194,7 @@ func (e *Engine) CheckAndDeployGit(ctx context.Context, app *config.AppConfig) (
 
 	// Deploy and verify health
 	deployStart := time.Now()
-	deployErr := e.composeService.Deploy(ctx, app, e.cfg.Defaults.ComposeCommand)
+	deployErr := e.composeService.Deploy(ctx, deployApp, e.cfg.Defaults.ComposeCommand)
 	deployDur := time.Since(deployStart)
 	if deployErr != nil {
 		e.metrics.RecordDeploy(app.Name, "git", "failure", deployDur)
@@ -203,7 +210,7 @@ func (e *Engine) CheckAndDeployGit(ctx context.Context, app *config.AppConfig) (
 				return false, fmt.Errorf("deploy failed (%v) and git rollback failed: %w", deployErr, rbGitErr)
 			}
 
-			if rbComposeErr := e.composeService.Rollback(ctx, app, e.cfg.Defaults.ComposeCommand); rbComposeErr != nil {
+			if rbComposeErr := e.composeService.Rollback(ctx, deployApp, e.cfg.Defaults.ComposeCommand); rbComposeErr != nil {
 				e.logger.Error("Failed to restart containers during rollback", "app", app.Name, "error", rbComposeErr)
 				e.saveState()
 				return false, fmt.Errorf("deploy failed (%v) and compose rollback failed: %w", deployErr, rbComposeErr)
@@ -281,8 +288,9 @@ func (e *Engine) CheckAndDeployRegistry(ctx context.Context, app *config.AppConf
 	}
 
 	// Deploy compose
+	deployApp := appWithEffectiveWorkDir(app)
 	deployStart := time.Now()
-	deployErr := e.composeService.Deploy(ctx, app, e.cfg.Defaults.ComposeCommand)
+	deployErr := e.composeService.Deploy(ctx, deployApp, e.cfg.Defaults.ComposeCommand)
 	deployDur := time.Since(deployStart)
 	if deployErr != nil {
 		e.metrics.RecordDeploy(app.Name, "registry", "failure", deployDur)
@@ -293,7 +301,7 @@ func (e *Engine) CheckAndDeployRegistry(ctx context.Context, app *config.AppConf
 		autoRollback := app.IsAutoRollbackEnabled(e.cfg.Defaults.IsAutoRollbackEnabled())
 		if autoRollback {
 			e.logger.Error("Deployment failed health checks after image update; triggering rollback", "app", app.Name, "error", deployErr)
-			if rbErr := e.composeService.Rollback(ctx, app, e.cfg.Defaults.ComposeCommand); rbErr != nil {
+			if rbErr := e.composeService.Rollback(ctx, deployApp, e.cfg.Defaults.ComposeCommand); rbErr != nil {
 				e.saveState()
 				return false, fmt.Errorf("deploy failed (%v) and rollback failed: %w", deployErr, rbErr)
 			}
@@ -354,10 +362,8 @@ func (e *Engine) SyncApp(ctx context.Context, appName string) error {
 	var syncedCommit string
 
 	targetRepoDir := targetApp.WorkDir
+	deployApp := appWithEffectiveWorkDir(targetApp)
 	if targetApp.Git != nil {
-		if targetApp.Git.Path != "" && targetApp.Git.Path != "." {
-			targetRepoDir = filepath.Dir(targetApp.WorkDir)
-		}
 		commit, err := e.gitSyncer.Sync(ctx, targetRepoDir, targetApp.Git)
 		if err != nil {
 			return fmt.Errorf("git sync failed: %w", err)
@@ -366,7 +372,7 @@ func (e *Engine) SyncApp(ctx context.Context, appName string) error {
 	}
 
 	deployStart := time.Now()
-	deployErr := e.composeService.Deploy(ctx, targetApp, e.cfg.Defaults.ComposeCommand)
+	deployErr := e.composeService.Deploy(ctx, deployApp, e.cfg.Defaults.ComposeCommand)
 	deployDur := time.Since(deployStart)
 	if deployErr != nil {
 		e.metrics.RecordDeploy(appName, "manual", "failure", deployDur)
@@ -374,7 +380,7 @@ func (e *Engine) SyncApp(ctx context.Context, appName string) error {
 		if autoRollback && previousCommit != "" && targetApp.Git != nil {
 			e.logger.Error("Manual sync failed health check; triggering automated rollback", "app", appName, "rollback_commit", previousCommit, "error", deployErr)
 			_ = e.gitSyncer.Rollback(ctx, targetRepoDir, targetApp.Git, previousCommit)
-			_ = e.composeService.Rollback(ctx, targetApp, e.cfg.Defaults.ComposeCommand)
+			_ = e.composeService.Rollback(ctx, deployApp, e.cfg.Defaults.ComposeCommand)
 			appState.LastRollback = &RollbackEvent{
 				Timestamp: time.Now(),
 				Reason:    deployErr.Error(),
