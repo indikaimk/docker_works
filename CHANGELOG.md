@@ -7,7 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.3.0] - 2026-11-20
+## [0.3.1] - 2026-11-20
+
+### Security
+- **Git Credential & SSH Hardening**: Passed HTTPS Git credentials via scoped `GIT_CONFIG_*` `http.extraHeader` env vars instead of CLI URL arguments, shell-quoted `ssh_key_path`, and added `--` separators / `-`-prefix validation against git flag injection.
+- **Webhook Server Hardening**: Enforced 1 MiB request body limits, HTTP server timeouts, constant-time token comparisons (`subtle.ConstantTimeCompare`), removed `?secret=` query-string auth, and added startup warnings for unauthenticated webhooks.
+- **Path Traversal & Installer Hardening**: Restricted `apps[].name` and `quadlet.files` against path traversal, restricted `state.json` to `0600`, warned on overly permissive `config.yaml` permissions, and added SHA256 `checksums.txt` verification to `scripts/install.sh`.
+
+## [0.3.0] - 2026-11-19
 
 ### Added
 - **Podman Runtime Support**: Added `defaults.runtime` (`docker` or `podman`) in `config.yaml`, automatically defaulting `compose_command` to `"podman compose"` and image pruning to `podman image prune -f`.
@@ -17,11 +24,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Doctor Runtime Inspection**: Updated `docker-works doctor` to detect `defaults.runtime` from config or `--runtime docker|podman` and verify Podman CLI, `podman compose`, and `podman info`.
 - **Installer Runtime Support**: Updated `scripts/install.sh` with `--runtime <docker|podman>` (and auto-detection when Docker is absent) to validate Podman prerequisites and install `docker-works-podman.service`.
 - **MkDocs Material Documentation**: Added `mkdocs.yml`, structured documentation under `docs/`, and `.github/workflows/docs.yml` for GitHub Pages deployment.
-
-### Security
-- **Git Credential & SSH Hardening**: Passed HTTPS Git credentials via scoped `GIT_CONFIG_*` `http.extraHeader` env vars instead of CLI URL arguments, shell-quoted `ssh_key_path`, and added `--` separators / `-`-prefix validation against git flag injection.
-- **Webhook Server Hardening**: Enforced 1 MiB request body limits, HTTP server timeouts, constant-time token comparisons (`subtle.ConstantTimeCompare`), removed `?secret=` query-string auth, and added startup warnings for unauthenticated webhooks.
-- **Path Traversal & Installer Hardening**: Restricted `apps[].name` and `quadlet.files` against path traversal, restricted `state.json` to `0600`, warned on overly permissive `config.yaml` permissions, and added SHA256 `checksums.txt` verification to `scripts/install.sh`.
 
 ## [0.1.0] - 2026-10-27
 
