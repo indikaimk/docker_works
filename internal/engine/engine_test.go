@@ -257,3 +257,31 @@ func TestEngineRollbackOnHealthCheckFailure(t *testing.T) {
 		t.Errorf("expected LastFailedCommit to be cleared after successful deployment, got %s", appState.LastFailedCommit)
 	}
 }
+
+func TestAppWithEffectiveWorkDir(t *testing.T) {
+	appRoot := &config.AppConfig{
+		Name:    "root-app",
+		WorkDir: "/var/lib/docker-works/apps/root-app",
+		Git: &config.GitConfig{
+			Path: ".",
+		},
+	}
+	if got := appWithEffectiveWorkDir(appRoot).WorkDir; got != appRoot.WorkDir {
+		t.Errorf("expected %s, got %s", appRoot.WorkDir, got)
+	}
+
+	appSub := &config.AppConfig{
+		Name:    "sub-app",
+		WorkDir: "/var/lib/docker-works/apps/sub-app",
+		Git: &config.GitConfig{
+			Path: "deploy/quadlets",
+		},
+	}
+	want := "/var/lib/docker-works/apps/sub-app/deploy/quadlets"
+	if got := appWithEffectiveWorkDir(appSub).WorkDir; got != want {
+		t.Errorf("expected %s, got %s", want, got)
+	}
+	if appSub.WorkDir != "/var/lib/docker-works/apps/sub-app" {
+		t.Errorf("original app.WorkDir was mutated: %s", appSub.WorkDir)
+	}
+}

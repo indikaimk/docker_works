@@ -257,6 +257,8 @@ func (c *Config) applyDefaults(configDir string) {
 			}
 			if app.Git.Path == "" {
 				app.Git.Path = "."
+			} else {
+				app.Git.Path = filepath.Clean(app.Git.Path)
 			}
 			if app.Git.PollInterval <= 0 {
 				app.Git.PollInterval = c.Defaults.GitPollInterval
@@ -317,6 +319,9 @@ func (c *Config) Validate() error {
 			}
 			if strings.HasPrefix(strings.TrimSpace(app.Git.Branch), "-") {
 				return fmt.Errorf("app %s git.branch must not start with '-'", app.Name)
+			}
+			if filepath.IsAbs(app.Git.Path) || strings.Contains(app.Git.Path, "..") {
+				return fmt.Errorf("app %s git.path %q must be a relative path without '..'", app.Name, app.Git.Path)
 			}
 		}
 
