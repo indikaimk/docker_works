@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-23
+
+### Added
+- **Quadlet Batch Task Support**: Added `Type=oneshot` completion handling (`ActiveState=inactive`, `Result=success`) and systemd `.timer` unit syncing (`quadlet.systemd_dir`) so scheduled batch jobs are enabled/restarted without firing on every deploy.
+- **Portable `./` Paths in Quadlets**: Automatically resolves `./` relative paths in `Volume`, `EnvironmentFile`, `Yaml`, `ConfigMap`, and `SeccompProfile` inside Quadlet unit files to absolute paths under `work_dir`.
+- **Prometheus Metrics Endpoint**: Added a zero-dependency `GET /metrics` endpoint (`server.metrics_enabled: true`) exporting deployment counts, rollbacks, poll errors, last deploy status/timestamp, and duration.
+- **Expanded Quadlet Documentation**: Documented unit activation order, portable `./` paths, `Type=oneshot` and `.timer` batch tasks, and unit name overrides in `docs/podman.md`.
+
+### Fixed
+- **Git Subdirectory Resolution (`git.path`)**: Cloned repositories consistently into `app.WorkDir` and resolved `<app.WorkDir>/<git.path>` as the effective deploy directory for both Compose and Quadlet modes, with path-traversal validation.
+
 ## [0.3.1] - 2026-11-20
 
 ### Security
