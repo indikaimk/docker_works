@@ -114,7 +114,53 @@ apps:
 ### How Quadlet Sync Works
 
 1. Syncs Quadlet unit files from `work_dir` into `<quadlet.dir>/<app.name>/` (removing stale unit files from previous commits), and syncs any `.timer` files into `quadlet.systemd_dir` (`/etc/systemd/system` or `~/.config/systemd/user`).
-2. Pulls any `Image=` references declared in the Quadlet files using `podman pull`.
-3. Runs `systemctl [--user] daemon-reload` so Podman's Quadlet generator updates the systemd units.
-4. Restarts long-running and standalone `Type=oneshot` services in dependency order (`.network`, `.volume`, `.image`, `.build`, `.pod`, `.kube`, `.container`), and enables/restarts `.timer` units without immediately firing their target batch `.service`.
-5. Monitors `systemctl [--user] show <unit>` until units are `active` (or `inactive` with `Result=success` for `Type=oneshot` batch tasks), triggering rollback if any unit enters `failed`.
+2. Rewrites portable `./` relative paths (see below) to absolute paths under `work_dir` when writing synced Quadlet files.
+3. Pulls any `Image=` references declared in the Quadlet files using `podman pull`.
+4. Runs `systemctl [--user] daemon-reload` so Podman's Quadlet generator updates the systemd units.
+5. Restarts long-running and standalone `Type=oneshot` services in dependency order:
+   `.network` → `.volume` → `.image` → `.build` → `.pod` → `.kube` → `.container`.
+   Any `.timer` units are enabled/started (`systemctl [--user] enable --now` + `restart`) without immediately firing their target batch `.service`.
+6. Monitors `systemctl [--user] show <unit>` until units are `active` (or `inactive` with `Result=success` for `Type=oneshot` batch tasks), triggering rollback if any unit enters `failed`.
+
+### Portable Relative Paths (`./`)
+
+Because Quadlet unit files are copied into `<quadlet.dir>/<app.name>/`, relative paths inside `.container` or `.kube` files would normally fail to resolve against your Git repository. DockerWorks automatically rewrites `./` paths to absolute paths inside `work_dir` for the following directives:
+
+- `Volume=./<path>:<container_path>[:<options>]`
+- `EnvironmentFile=./<path>` and `EnvironmentFile=-./<path>`
+- `Yaml=./<path>` (`.kube` units)
+- `ConfigMap=./<path>` (`.kube` units)
+- `SeccompProfile=./<path>` (`.container` units)
+
+Absolute paths (e.g. `/data/kafka`), systemd specifiers (e.g. `%h/...`), and named volumes (e.g. `mydata.volume:/data`) are left untouched:
+
+```ini
+[Container]
+Image=prom/prometheus:latest
+# Versioned config file in Git -> rewritten to <work_dir>/prometheus.yml
+Volume=./prometheus.yml:/etc/prometheus/prometheus.yml:Z,U
+# Persistent host data directory -> left untouched
+Volume=/data/kafka:/prometheus:Z,U
+# Optional .env file in Git -> rewritten to -<work_dir>/app.env
+EnvironmentFile=-./app.env
+```
+
+### Batch Tasks (`Type=oneshot` & `.timer` Units)
+
+- **Deploy-time batch jobs (`Type=oneshot`):** Add `[Service]\nType=oneshot` in your `.container` unit. DockerWorks restarts the unit on deploy and treats `ActiveState=inactive` with `Result=success` as a successful run.
+- **Scheduled batch jobs (`.timer`):** Place a matching `<name>.timer` (or specify `Unit=<target>.service` in `[Timer]`) alongside `<name>.container`. DockerWorks syncs the `.timer` into `quadlet.systemd_dir`, enables and restarts the timer, and skips running the target `.service` immediately on deploy.
+
+### Unit Name Mapping & Overrides
+
+By default, DockerWorks derives the systemd unit name from the Quadlet filename:
+
+| Extension | Generated Unit |
+| :--- | :--- |
+| `.container`, `.kube` | `<name>.service` |
+| `.pod` | `<name>-pod.service` |
+| `.network` | `<name>-network.service` |
+| `.volume` | `<name>-volume.service` |
+| `.image` | `<name>-image.service` |
+| `.build` | `<name>-build.service` |
+
+If you set `ServiceName=` inside a Quadlet file or specify `quadlet.services` in `config.yaml`, DockerWorks uses those unit names instead.
