@@ -233,6 +233,68 @@ func resolveQuadletPlan(app *config.AppConfig) (*quadletPlan, error) {
 	return plan, nil
 }
 
+// resolveQuadletRelativePaths rewrites portable "./..." source paths in Volume, EnvironmentFile,
+// Yaml, ConfigMap, and SeccompProfile directives to absolute paths under workDir.
+func resolveQuadletRelativePaths(content, workDir string) string {
+	absWorkDir, err := filepath.Abs(workDir)
+	if err != nil {
+		absWorkDir = workDir
+	}
+
+	resolveRel := func(rel string) (string, bool) {
+		if !strings.HasPrefix(rel, "./") {
+			return rel, false
+		}
+		cleaned := filepath.Clean(rel)
+		if cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
+			return rel, false
+		}
+		return filepath.Join(absWorkDir, cleaned), true
+	}
+
+	lines := strings.Split(content, "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, ";") || strings.HasPrefix(trimmed, "[") {
+			continue
+		}
+		idx := strings.IndexByte(line, '=')
+		if idx < 0 {
+			continue
+		}
+		key := strings.TrimSpace(line[:idx])
+		val := strings.TrimSpace(line[idx+1:])
+
+		switch key {
+		case "Volume":
+			parts := strings.SplitN(val, ":", 2)
+			if resolved, ok := resolveRel(parts[0]); ok {
+				if len(parts) == 2 {
+					lines[i] = key + "=" + resolved + ":" + parts[1]
+				} else {
+					lines[i] = key + "=" + resolved
+				}
+			}
+		case "EnvironmentFile":
+			prefix := ""
+			target := val
+			if strings.HasPrefix(val, "-") {
+				prefix = "-"
+				target = val[1:]
+			}
+			if resolved, ok := resolveRel(target); ok {
+				lines[i] = key + "=" + prefix + resolved
+			}
+		case "Yaml", "ConfigMap", "SeccompProfile":
+			if resolved, ok := resolveRel(val); ok {
+				lines[i] = key + "=" + resolved
+			}
+		}
+	}
+
+	return strings.Join(lines, "\n")
+}
+
 func syncQuadletFiles(app *config.AppConfig, files []string) error {
 	targetDir := filepath.Join(app.Quadlet.Dir, app.Name)
 	if err := os.MkdirAll(targetDir, 0755); err != nil {
@@ -254,8 +316,9 @@ func syncQuadletFiles(app *config.AppConfig, files []string) error {
 		if err != nil {
 			return fmt.Errorf("failed to read quadlet file %s: %w", src, err)
 		}
+		resolved := resolveQuadletRelativePaths(string(data), app.WorkDir)
 		dst := filepath.Join(targetDir, filepath.Base(src))
-		if err := os.WriteFile(dst, data, 0644); err != nil {
+		if err := os.WriteFile(dst, []byte(resolved), 0644); err != nil {
 			return fmt.Errorf("failed to write quadlet file %s: %w", dst, err)
 		}
 	}

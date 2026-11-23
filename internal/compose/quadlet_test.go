@@ -256,3 +256,33 @@ func TestQuadletTimerBatchJob(t *testing.T) {
 		t.Errorf("expected backup.timer to be synced to %s: %v", systemdDir, err)
 	}
 }
+
+func TestResolveQuadletRelativePaths(t *testing.T) {
+	workDir := "/var/lib/docker-works/apps/kafka"
+	input := `[Container]
+Image=prom/prometheus:latest
+Volume=./prometheus.yml:/etc/prometheus/prometheus.yml:Z,U
+Volume=/data/kafka:/prometheus:Z,U
+Volume=named-vol:/var/lib/data
+EnvironmentFile=./app.env
+EnvironmentFile=-./optional.env
+EnvironmentFile=/etc/docker-works/secrets/prod.env
+SeccompProfile=./seccomp.json
+`
+	got := resolveQuadletRelativePaths(input, workDir)
+
+	checks := []string{
+		"Volume=/var/lib/docker-works/apps/kafka/prometheus.yml:/etc/prometheus/prometheus.yml:Z,U",
+		"Volume=/data/kafka:/prometheus:Z,U",
+		"Volume=named-vol:/var/lib/data",
+		"EnvironmentFile=/var/lib/docker-works/apps/kafka/app.env",
+		"EnvironmentFile=-/var/lib/docker-works/apps/kafka/optional.env",
+		"EnvironmentFile=/etc/docker-works/secrets/prod.env",
+		"SeccompProfile=/var/lib/docker-works/apps/kafka/seccomp.json",
+	}
+	for _, want := range checks {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected %q in resolved output:\n%s", want, got)
+		}
+	}
+}
