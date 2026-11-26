@@ -191,6 +191,9 @@ func runValidate(args []string) {
 		if app.Registry != nil {
 			watchers = append(watchers, fmt.Sprintf("registry: %d images", len(app.Registry.WatchImages)))
 		}
+		if app.OCI != nil {
+			watchers = append(watchers, fmt.Sprintf("oci: %s", app.OCI.Artifact))
+		}
 		fmt.Printf("  - %s (work_dir: %s, watchers: %v)\n", app.Name, app.WorkDir, watchers)
 	}
 }

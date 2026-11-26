@@ -102,6 +102,16 @@ Each app must specify at least one watcher (`git` or `registry`) and a unique `n
 | `poll_interval` | `duration` | `defaults.registry_poll_interval` | How often to inspect remote manifest digests. |
 | `auth.<domain>` | `object` | `{}` | Optional per-registry credentials (`token` or `username`/`password`). Falls back to `~/.docker/config.json` and Podman `auth.json`. |
 
+#### `apps[].oci` *(Gitless Config Bundles)*
+
+Pulls Compose, Quadlet, and config files directly from an OCI registry (pushed via `oras push` or as an OCI config image) into `work_dir`, enabling a completely gitless workflow with digest-pinned rollbacks.
+
+| Field | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `artifact` | `string` | *(required)* | OCI artifact reference (e.g. `ghcr.io/myorg/my-app-config:latest`). |
+| `poll_interval` | `duration` | `defaults.registry_poll_interval` | How often to inspect the remote artifact manifest digest. |
+| `auth.<domain>` | `object` | `{}` | Optional per-registry credentials (`token` or `username`/`password`). Falls back to `~/.docker/config.json` and Podman `auth.json`. |
+
 #### `apps[].hooks`
 
 Shell commands executed via `/bin/sh -c` in `work_dir` with `DOCKER_WORKS_APP=<name>`:

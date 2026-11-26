@@ -19,12 +19,14 @@ import (
 )
 
 type AppState struct {
-	LastGitCommit     string            `json:"last_git_commit"`
-	LastFailedCommit  string            `json:"last_failed_commit,omitempty"`
-	ImageDigests      map[string]string `json:"image_digests"`
-	LastFailedDigests map[string]string `json:"last_failed_digests,omitempty"`
-	LastDeployed      time.Time         `json:"last_deployed"`
-	LastRollback      *RollbackEvent    `json:"last_rollback,omitempty"`
+	LastGitCommit       string            `json:"last_git_commit"`
+	LastFailedCommit    string            `json:"last_failed_commit,omitempty"`
+	LastOCIDigest       string            `json:"last_oci_digest,omitempty"`
+	LastFailedOCIDigest string            `json:"last_failed_oci_digest,omitempty"`
+	ImageDigests        map[string]string `json:"image_digests"`
+	LastFailedDigests   map[string]string `json:"last_failed_digests,omitempty"`
+	LastDeployed        time.Time         `json:"last_deployed"`
+	LastRollback        *RollbackEvent    `json:"last_rollback,omitempty"`
 }
 
 type RollbackEvent struct {
@@ -335,6 +337,98 @@ func (e *Engine) CheckAndDeployRegistry(ctx context.Context, app *config.AppConf
 	return true, nil
 }
 
+// CheckAndDeployOCI checks if an OCI config/artifact digest changed, pulls it into WorkDir, deploys, and rolls back on failure.
+func (e *Engine) CheckAndDeployOCI(ctx context.Context, app *config.AppConfig) (bool, error) {
+	if app.OCI == nil || app.OCI.Artifact == "" {
+		return false, nil
+	}
+
+	puller, ok := e.registryChecker.(registry.ArtifactPuller)
+	if !ok {
+		return false, fmt.Errorf("registry checker does not support OCI artifact pulling")
+	}
+
+	lock := e.appLocks[app.Name]
+	lock.Lock()
+	defer lock.Unlock()
+
+	appState := e.getAppState(app.Name)
+
+	remoteDigest, err := e.registryChecker.GetRemoteDigest(ctx, app.OCI.Artifact, app.OCI.Auth)
+	if err != nil {
+		e.metrics.RecordPollError(app.Name, "oci")
+		return false, fmt.Errorf("failed to check remote OCI artifact digest for %s: %w", app.Name, err)
+	}
+
+	if appState.LastOCIDigest == remoteDigest {
+		e.logger.Debug("OCI artifact up to date", "app", app.Name, "digest", remoteDigest)
+		return false, nil
+	}
+
+	if appState.LastFailedOCIDigest == remoteDigest {
+		e.logger.Debug("Skipping OCI artifact digest that previously failed health check", "app", app.Name, "digest", remoteDigest)
+		return false, nil
+	}
+
+	e.logger.Info("New OCI artifact digest detected", "app", app.Name, "artifact", app.OCI.Artifact, "old", appState.LastOCIDigest, "new", remoteDigest)
+	previousDigest := appState.LastOCIDigest
+
+	pulledDigest, err := puller.PullArtifact(ctx, app.OCI.Artifact, app.OCI.Auth, app.WorkDir)
+	if err != nil {
+		return false, fmt.Errorf("failed to pull OCI artifact for %s: %w", app.Name, err)
+	}
+
+	deployApp := appWithEffectiveWorkDir(app)
+	deployStart := time.Now()
+	deployErr := e.composeService.Deploy(ctx, deployApp, e.cfg.Defaults.ComposeCommand)
+	deployDur := time.Since(deployStart)
+	if deployErr != nil {
+		e.metrics.RecordDeploy(app.Name, "oci", "failure", deployDur)
+		appState.LastFailedOCIDigest = remoteDigest
+
+		autoRollback := app.IsAutoRollbackEnabled(e.cfg.Defaults.IsAutoRollbackEnabled())
+		if autoRollback && previousDigest != "" {
+			e.logger.Error("OCI deployment failed health checks; triggering automated rollback", "app", app.Name, "failed_digest", remoteDigest, "rollback_digest", previousDigest, "error", deployErr)
+
+			pinnedRef, pinErr := registry.PinDigest(app.OCI.Artifact, previousDigest)
+			if pinErr != nil {
+				e.saveState()
+				return false, fmt.Errorf("deploy failed (%v) and OCI rollback pin failed: %w", deployErr, pinErr)
+			}
+			if _, rbPullErr := puller.PullArtifact(ctx, pinnedRef, app.OCI.Auth, app.WorkDir); rbPullErr != nil {
+				e.saveState()
+				return false, fmt.Errorf("deploy failed (%v) and OCI rollback pull failed: %w", deployErr, rbPullErr)
+			}
+			if rbErr := e.composeService.Rollback(ctx, deployApp, e.cfg.Defaults.ComposeCommand); rbErr != nil {
+				e.saveState()
+				return false, fmt.Errorf("deploy failed (%v) and rollback failed: %w", deployErr, rbErr)
+			}
+
+			appState.LastRollback = &RollbackEvent{
+				Timestamp: time.Now(),
+				Reason:    deployErr.Error(),
+				Target:    previousDigest,
+			}
+			e.metrics.RecordRollback(app.Name)
+			e.saveState()
+			return false, fmt.Errorf("deployment failed healthcheck: %v (automatically rolled back to OCI digest %s)", deployErr, previousDigest)
+		}
+
+		e.saveState()
+		return false, fmt.Errorf("deployment failed after OCI artifact update: %w", deployErr)
+	}
+
+	if pulledDigest != "" {
+		remoteDigest = pulledDigest
+	}
+	appState.LastOCIDigest = remoteDigest
+	appState.LastFailedOCIDigest = ""
+	appState.LastDeployed = time.Now()
+	e.metrics.RecordDeploy(app.Name, "oci", "success", deployDur)
+	e.saveState()
+	return true, nil
+}
+
 // SyncApp forces a git sync (if configured) and deployment for an app.
 func (e *Engine) SyncApp(ctx context.Context, appName string) error {
 	var targetApp *config.AppConfig
@@ -356,10 +450,13 @@ func (e *Engine) SyncApp(ctx context.Context, appName string) error {
 	appState := e.getAppState(appName)
 	// Clear any previous failure block on manual sync
 	appState.LastFailedCommit = ""
+	appState.LastFailedOCIDigest = ""
 	appState.LastFailedDigests = make(map[string]string)
 
 	previousCommit := appState.LastGitCommit
+	previousOCIDigest := appState.LastOCIDigest
 	var syncedCommit string
+	var pulledOCIDigest string
 
 	targetRepoDir := targetApp.WorkDir
 	deployApp := appWithEffectiveWorkDir(targetApp)
@@ -369,6 +466,16 @@ func (e *Engine) SyncApp(ctx context.Context, appName string) error {
 			return fmt.Errorf("git sync failed: %w", err)
 		}
 		syncedCommit = commit
+	} else if targetApp.OCI != nil {
+		puller, ok := e.registryChecker.(registry.ArtifactPuller)
+		if !ok {
+			return fmt.Errorf("registry checker does not support OCI artifact pulling")
+		}
+		digest, err := puller.PullArtifact(ctx, targetApp.OCI.Artifact, targetApp.OCI.Auth, targetApp.WorkDir)
+		if err != nil {
+			return fmt.Errorf("OCI artifact pull failed: %w", err)
+		}
+		pulledOCIDigest = digest
 	}
 
 	deployStart := time.Now()
@@ -390,11 +497,30 @@ func (e *Engine) SyncApp(ctx context.Context, appName string) error {
 			e.saveState()
 			return fmt.Errorf("deployment failed healthcheck: %v (automatically rolled back to commit %s)", deployErr, previousCommit)
 		}
+		if autoRollback && previousOCIDigest != "" && targetApp.OCI != nil {
+			if puller, ok := e.registryChecker.(registry.ArtifactPuller); ok {
+				if pinnedRef, pinErr := registry.PinDigest(targetApp.OCI.Artifact, previousOCIDigest); pinErr == nil {
+					_, _ = puller.PullArtifact(ctx, pinnedRef, targetApp.OCI.Auth, targetApp.WorkDir)
+					_ = e.composeService.Rollback(ctx, deployApp, e.cfg.Defaults.ComposeCommand)
+					appState.LastRollback = &RollbackEvent{
+						Timestamp: time.Now(),
+						Reason:    deployErr.Error(),
+						Target:    previousOCIDigest,
+					}
+					e.metrics.RecordRollback(appName)
+					e.saveState()
+					return fmt.Errorf("deployment failed healthcheck: %v (automatically rolled back to OCI digest %s)", deployErr, previousOCIDigest)
+				}
+			}
+		}
 		return fmt.Errorf("compose deploy failed: %w", deployErr)
 	}
 
 	if syncedCommit != "" {
 		appState.LastGitCommit = syncedCommit
+	}
+	if pulledOCIDigest != "" {
+		appState.LastOCIDigest = pulledOCIDigest
 	}
 	appState.LastDeployed = time.Now()
 	e.metrics.RecordDeploy(appName, "manual", "success", deployDur)
@@ -482,6 +608,31 @@ func (e *Engine) Start(ctx context.Context) error {
 					case <-ticker.C:
 						if _, err := e.CheckAndDeployRegistry(ctx, a); err != nil {
 							e.logger.Error("Registry check failed", "app", a.Name, "error", err)
+						}
+					}
+				}
+			}(app)
+		}
+
+		// OCI artifact watcher loop
+		if app.OCI != nil {
+			wg.Add(1)
+			go func(a *config.AppConfig) {
+				defer wg.Done()
+				ticker := time.NewTicker(a.OCI.PollInterval)
+				defer ticker.Stop()
+
+				if _, err := e.CheckAndDeployOCI(ctx, a); err != nil {
+					e.logger.Error("Initial OCI artifact check failed", "app", a.Name, "error", err)
+				}
+
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					case <-ticker.C:
+						if _, err := e.CheckAndDeployOCI(ctx, a); err != nil {
+							e.logger.Error("OCI artifact check failed", "app", a.Name, "error", err)
 						}
 					}
 				}
