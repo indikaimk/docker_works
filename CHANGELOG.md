@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-26
+
+### Added
+- **Gitless OCI Artifact Support (`apps[].oci`)**: Added an OCI artifact watcher and extractor (`internal/registry/oci.go`) supporting both ORAS-style raw file layers and tar/tar+gzip OCI image layers, with Zip-Slip path-traversal protection and a 64 MiB extraction cap.
+- **Digest-Pinned Rollback**: On healthcheck failure, OCI-backed apps automatically pull the previous immutable `@sha256:...` artifact digest and roll back, with Prometheus `trigger="oci"` metrics and `docker-works validate` reporting.
+
 ## [0.4.0] - 2026-11-23
 
 ### Added
