@@ -285,3 +285,60 @@ func TestAppWithEffectiveWorkDir(t *testing.T) {
 		t.Errorf("original app.WorkDir was mutated: %s", appSub.WorkDir)
 	}
 }
+
+type mockOCIArtifactPuller struct {
+	digest     string
+	pulledRefs []string
+}
+
+func (m *mockOCIArtifactPuller) GetRemoteDigest(ctx context.Context, imageRef string, authMap map[string]config.RegistryAuth) (string, error) {
+	return m.digest, nil
+}
+
+func (m *mockOCIArtifactPuller) PullArtifact(ctx context.Context, artifactRef string, authMap map[string]config.RegistryAuth, destDir string) (string, error) {
+	m.pulledRefs = append(m.pulledRefs, artifactRef)
+	return m.digest, nil
+}
+
+func TestEngineCheckAndDeployOCI(t *testing.T) {
+	runner := &mockRunner{}
+	composeSvc := compose.NewService(runner, nil)
+	gitSyncer := gitops.NewSyncer(runner, nil)
+	ociPuller := &mockOCIArtifactPuller{
+		digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	}
+
+	tempDir := t.TempDir()
+	cfg := &config.Config{
+		Defaults: config.DefaultsConfig{
+			StateDir:       tempDir,
+			ComposeCommand: "docker compose",
+		},
+		Apps: []config.AppConfig{
+			{
+				Name:    "gitless-app",
+				WorkDir: tempDir + "/gitless-app",
+				OCI: &config.OCIConfig{
+					Artifact:     "ghcr.io/myorg/gitless-config:latest",
+					PollInterval: time.Minute,
+				},
+			},
+		},
+	}
+
+	eng := NewEngine(cfg, composeSvc, gitSyncer, ociPuller, nil)
+
+	deployed, err := eng.CheckAndDeployOCI(context.Background(), &cfg.Apps[0])
+	if err != nil || !deployed {
+		t.Fatalf("expected initial OCI deploy to succeed, deployed=%v, err=%v", deployed, err)
+	}
+	if len(ociPuller.pulledRefs) != 1 || ociPuller.pulledRefs[0] != "ghcr.io/myorg/gitless-config:latest" {
+		t.Errorf("unexpected pulled refs: %v", ociPuller.pulledRefs)
+	}
+
+	// Second poll with same digest should be a no-op
+	deployedAgain, err := eng.CheckAndDeployOCI(context.Background(), &cfg.Apps[0])
+	if err != nil || deployedAgain {
+		t.Errorf("expected no-op on unchanged digest, deployed=%v, err=%v", deployedAgain, err)
+	}
+}

@@ -32,19 +32,11 @@ func NewRemoteChecker(logger *slog.Logger) *RemoteChecker {
 	return &RemoteChecker{logger: logger}
 }
 
-// GetRemoteDigest inspects the remote registry and returns the manifest digest (e.g. sha256:...)
-// without pulling the entire image layers.
-func (c *RemoteChecker) GetRemoteDigest(ctx context.Context, imageRef string, authMap map[string]config.RegistryAuth) (string, error) {
-	ref, err := name.ParseReference(imageRef)
-	if err != nil {
-		return "", fmt.Errorf("invalid image reference '%s': %w", imageRef, err)
-	}
-
+func buildRemoteOptions(ctx context.Context, ref name.Reference, authMap map[string]config.RegistryAuth) []remote.Option {
 	opts := []remote.Option{
 		remote.WithContext(ctx),
 	}
 
-	// Check if auth credentials are provided for the registry domain
 	registryDomain := ref.Context().RegistryStr()
 	var auth authn.Authenticator
 
@@ -72,6 +64,18 @@ func (c *RemoteChecker) GetRemoteDigest(ctx context.Context, imageRef string, au
 			authn.NewMultiKeychain(authn.DefaultKeychain, &podmanKeychain{}),
 		))
 	}
+	return opts
+}
+
+// GetRemoteDigest inspects the remote registry and returns the manifest digest (e.g. sha256:...)
+// without pulling the entire image layers.
+func (c *RemoteChecker) GetRemoteDigest(ctx context.Context, imageRef string, authMap map[string]config.RegistryAuth) (string, error) {
+	ref, err := name.ParseReference(imageRef)
+	if err != nil {
+		return "", fmt.Errorf("invalid image reference '%s': %w", imageRef, err)
+	}
+
+	opts := buildRemoteOptions(ctx, ref, authMap)
 
 	// Try remote.Head first (fastest HEAD HTTP request)
 	desc, err := remote.Head(ref, opts...)

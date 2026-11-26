@@ -63,6 +63,7 @@ type AppConfig struct {
 	Quadlet            *QuadletConfig  `yaml:"quadlet"`
 	Git                *GitConfig      `yaml:"git"`
 	Registry           *RegistryConfig `yaml:"registry"`
+	OCI                *OCIConfig      `yaml:"oci"`
 	Webhook            *WebhookConfig  `yaml:"webhook"`
 	Hooks              HooksConfig     `yaml:"hooks"`
 	AutoPrune          bool            `yaml:"auto_prune"`
@@ -116,6 +117,12 @@ type GitAuthConfig struct {
 
 type RegistryConfig struct {
 	WatchImages  []string                `yaml:"watch_images"`
+	PollInterval time.Duration           `yaml:"poll_interval"`
+	Auth         map[string]RegistryAuth `yaml:"auth"`
+}
+
+type OCIConfig struct {
+	Artifact     string                  `yaml:"artifact"`
 	PollInterval time.Duration           `yaml:"poll_interval"`
 	Auth         map[string]RegistryAuth `yaml:"auth"`
 }
@@ -270,6 +277,12 @@ func (c *Config) applyDefaults(configDir string) {
 				app.Registry.PollInterval = c.Defaults.RegistryPollInterval
 			}
 		}
+
+		if app.OCI != nil {
+			if app.OCI.PollInterval <= 0 {
+				app.OCI.PollInterval = c.Defaults.RegistryPollInterval
+			}
+		}
 	}
 }
 
@@ -306,8 +319,12 @@ func (c *Config) Validate() error {
 			}
 		}
 
-		if app.Git == nil && app.Registry == nil {
-			return fmt.Errorf("app %s must specify at least one watcher: 'git' or 'registry'", app.Name)
+		if app.Git == nil && app.Registry == nil && app.OCI == nil {
+			return fmt.Errorf("app %s must specify at least one watcher: 'git', 'registry', or 'oci'", app.Name)
+		}
+
+		if app.OCI != nil && strings.TrimSpace(app.OCI.Artifact) == "" {
+			return fmt.Errorf("app %s has oci config but artifact is empty", app.Name)
 		}
 
 		if app.Git != nil {
