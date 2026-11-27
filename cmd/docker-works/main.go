@@ -301,7 +301,28 @@ func runDoctor(args []string) {
 		}
 	}
 
-	// 6. Configuration Check
+	// 6. Optional SOPS CLI check (when any app configures sops)
+	needsSops := false
+	if loadedCfg != nil {
+		for _, app := range loadedCfg.Apps {
+			if app.Sops != nil && len(app.Sops.Files) > 0 {
+				needsSops = true
+				break
+			}
+		}
+	}
+	if needsSops {
+		sopsOut, err := exec.Command("sops", "--version").Output()
+		if err == nil {
+			firstLine := strings.SplitN(strings.TrimSpace(string(sopsOut)), "\n", 2)[0]
+			fmt.Printf("[✓] SOPS CLI:          %s\n", firstLine)
+		} else {
+			fmt.Println("[✗] SOPS CLI:          Not found on PATH (required by apps[].sops)")
+			allPass = false
+		}
+	}
+
+	// 7. Configuration Check
 	if cfgStatErr == nil {
 		if cfgLoadErr == nil {
 			fmt.Printf("[✓] Configuration:     Valid (%s, %d apps configured)\n", resolvedPath, len(loadedCfg.Apps))

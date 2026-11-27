@@ -264,3 +264,55 @@ apps:
 		t.Errorf("expected default target prometheus.yml, got %q", got)
 	}
 }
+
+func TestSopsConfigDefaultsAndValidation(t *testing.T) {
+	tempDir := t.TempDir()
+	cfgPath := filepath.Join(tempDir, "sops.yaml")
+
+	yamlContent := `
+apps:
+  - name: "sops-app"
+    git:
+      repo: "https://github.com/example/repo.git"
+    sops:
+      age_key_file: "/etc/docker-works/keys/age.key"
+      files:
+        - source: "secrets.enc.env"
+        - source: "config/app.enc.yaml"
+          output_type: "yaml"
+`
+	if err := os.WriteFile(cfgPath, []byte(yamlContent), 0644); err != nil {
+		t.Fatalf("failed to write test config: %v", err)
+	}
+
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatalf("failed to load sops config: %v", err)
+	}
+
+	files := cfg.Apps[0].Sops.Files
+	if files[0].Target != "secrets.env" {
+		t.Errorf("expected default target secrets.env, got %q", files[0].Target)
+	}
+	if files[1].Target != "config/app.yaml" {
+		t.Errorf("expected default target config/app.yaml, got %q", files[1].Target)
+	}
+
+	// Traversal should fail
+	badPath := filepath.Join(tempDir, "bad-sops.yaml")
+	badYaml := `
+apps:
+  - name: "sops-bad"
+    git:
+      repo: "https://github.com/example/repo.git"
+    sops:
+      files:
+        - source: "../secret.enc.env"
+`
+	if err := os.WriteFile(badPath, []byte(badYaml), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(badPath); err == nil {
+		t.Errorf("expected validation error for sops source traversal")
+	}
+}

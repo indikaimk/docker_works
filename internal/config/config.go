@@ -61,6 +61,7 @@ type AppConfig struct {
 	ComposeFiles       []string         `yaml:"compose_files"`
 	EnvFiles           []string         `yaml:"env_files"`
 	Quadlet            *QuadletConfig   `yaml:"quadlet"`
+	Sops               *SopsConfig      `yaml:"sops"`
 	Templates          *TemplatesConfig `yaml:"templates"`
 	Git                *GitConfig       `yaml:"git"`
 	Registry           *RegistryConfig  `yaml:"registry"`
@@ -137,6 +138,18 @@ type TemplatesConfig struct {
 type TemplateFileSpec struct {
 	Source string `yaml:"source"`
 	Target string `yaml:"target"`
+}
+
+type SopsConfig struct {
+	Files      []SopsFileConfig `yaml:"files"`
+	AgeKeyFile string           `yaml:"age_key_file"`
+	AgeKey     string           `yaml:"age_key"`
+}
+
+type SopsFileConfig struct {
+	Source     string `yaml:"source"`
+	Target     string `yaml:"target"`
+	OutputType string `yaml:"output_type"`
 }
 
 type RegistryAuth struct {
@@ -306,6 +319,18 @@ func (c *Config) applyDefaults(configDir string) {
 				}
 			}
 		}
+
+		if app.Sops != nil {
+			for j := range app.Sops.Files {
+				sf := &app.Sops.Files[j]
+				sf.Source = strings.TrimSpace(sf.Source)
+				sf.Target = strings.TrimSpace(sf.Target)
+				sf.OutputType = strings.ToLower(strings.TrimSpace(sf.OutputType))
+				if sf.Target == "" && sf.Source != "" {
+					sf.Target = defaultSopsTarget(sf.Source)
+				}
+			}
+		}
 	}
 }
 
@@ -372,6 +397,28 @@ func (c *Config) Validate() error {
 			}
 		}
 
+		if app.Sops != nil {
+			if strings.ContainsAny(app.Sops.AgeKeyFile, "\x00\r\n") {
+				return fmt.Errorf("app %s sops.age_key_file contains invalid control characters", app.Name)
+			}
+			for j, sf := range app.Sops.Files {
+				if sf.Source == "" {
+					return fmt.Errorf("app %s sops.files[%d].source must not be empty", app.Name, j)
+				}
+				if filepath.IsAbs(sf.Source) || strings.Contains(sf.Source, "..") {
+					return fmt.Errorf("app %s sops.files[%d].source %q must be a relative path without '..'", app.Name, j, sf.Source)
+				}
+				if filepath.IsAbs(sf.Target) || strings.Contains(sf.Target, "..") {
+					return fmt.Errorf("app %s sops.files[%d].target %q must be a relative path without '..'", app.Name, j, sf.Target)
+				}
+				switch sf.OutputType {
+				case "", "dotenv", "yaml", "json", "binary":
+				default:
+					return fmt.Errorf("app %s sops.files[%d].output_type %q must be dotenv, yaml, json, or binary", app.Name, j, sf.OutputType)
+				}
+			}
+		}
+
 		if app.Git != nil {
 			if strings.TrimSpace(app.Git.Repo) == "" {
 				return fmt.Errorf("app %s has git config but repo is empty", app.Name)
@@ -422,4 +469,14 @@ func defaultTemplateTarget(source string) string {
 		}
 	}
 	return ""
+}
+
+func defaultSopsTarget(source string) string {
+	if strings.Contains(source, ".enc.") {
+		return strings.Replace(source, ".enc.", ".", 1)
+	}
+	if strings.HasSuffix(source, ".enc") {
+		return strings.TrimSuffix(source, ".enc")
+	}
+	return ".env"
 }
