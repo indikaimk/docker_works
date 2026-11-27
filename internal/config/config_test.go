@@ -265,6 +265,55 @@ apps:
 	}
 }
 
+func TestAppsDirAndConfigGit(t *testing.T) {
+	tempDir := t.TempDir()
+	appsDir := filepath.Join(tempDir, "apps.d")
+	if err := os.MkdirAll(appsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	app1 := `
+name: "nginx-app"
+git:
+  repo: "https://github.com/example/nginx.git"
+`
+	app2 := `
+apps:
+  - name: "redis-app"
+    registry:
+      watch_images:
+        - "redis:alpine"
+`
+	if err := os.WriteFile(filepath.Join(appsDir, "01-nginx.yaml"), []byte(app1), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appsDir, "02-redis.yml"), []byte(app2), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfgPath := filepath.Join(tempDir, "config.yaml")
+	mainYAML := `
+apps_dir: "apps.d"
+config_git:
+  repo: "https://github.com/example/infra-configs.git"
+  path: "hosts/prod-01"
+`
+	if err := os.WriteFile(cfgPath, []byte(mainYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatalf("failed to load config with apps_dir and config_git: %v", err)
+	}
+	if len(cfg.Apps) != 2 {
+		t.Fatalf("expected 2 apps from apps_dir, got %d", len(cfg.Apps))
+	}
+	if cfg.ConfigGit == nil || cfg.ConfigGit.Branch != "main" || cfg.ConfigGit.ConfigFile != "config.yaml" {
+		t.Errorf("unexpected config_git defaults: %+v", cfg.ConfigGit)
+	}
+}
+
 func TestSopsConfigDefaultsAndValidation(t *testing.T) {
 	tempDir := t.TempDir()
 	cfgPath := filepath.Join(tempDir, "sops.yaml")

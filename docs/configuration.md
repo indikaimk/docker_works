@@ -65,6 +65,34 @@ apps:
 | `health_check_timeout` | `duration` | `"60s"` | Maximum time to wait for containers to report healthy after `up`. |
 | `auto_rollback` | `bool` | `true` | Automatically roll back on failed health checks. |
 
+### `config_git` *(Self-Config GitOps & Hot Reload)*
+
+Allows `docker-works` to pull its own `config.yaml` (and `apps_dir`) from a Git repository and hot-reload watchers automatically when valid commits are pushed (also pulled on `docker-works sync`). Invalid commits are rejected and skipped while keeping the active configuration running.
+
+```yaml
+# Minimal bootstrap /etc/docker-works/config.yaml on the host
+defaults:
+  runtime: "podman"
+  state_dir: "/var/lib/docker-works"
+
+config_git:
+  repo: "https://github.com/myorg/docker-works-configs.git"
+  branch: "main"
+  path: "hosts/prod-01"          # Subdirectory inside repo (default: ".")
+  config_file: "config.yaml"     # Config filename inside path (default: "config.yaml")
+  poll_interval: "2m"            # Defaults to defaults.git_poll_interval
+  auth:
+    token: "${GITHUB_TOKEN}"     # Or ssh_key_path / username+password
+```
+
+### `apps_dir` *(Multi-File App Configs)*
+
+Optional directory path (relative to the config file, or absolute) containing `*.yaml` / `*.yml` app definitions. Each file can define either a single app object or an `apps:` list:
+
+```yaml
+apps_dir: "apps.d" # Loads apps.d/*.yaml in alphabetical order
+```
+
 ### `apps[]`
 
 Each app must specify at least one watcher (`git` or `registry`) and a unique `name`.

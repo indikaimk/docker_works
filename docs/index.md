@@ -10,6 +10,7 @@
 - **Native Compose Engine**: Invokes `docker compose` or `podman compose` directly via `defaults.runtime` (`docker` or `podman`), supporting multiple compose files (`-f`) and `.env` files.
 - **GitOps Mode (Pull-based)**:
   - Watches Git repositories (GitHub, GitLab, Gitea, etc.) for new commits on target branches.
+  - Supports self-config GitOps (`config_git` + `apps_dir`) to source `docker-works`'s own `config.yaml` from Git with in-process hot reload.
   - Checks remote heads via `git ls-remote` without cloning on every poll.
   - Supports SSH deploy keys (`ssh_key_path`), HTTPS tokens, username/password auth, and monorepo subdirectories (`path`).
 - **Gitless OCI Artifact Mode**:
