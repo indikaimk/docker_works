@@ -119,3 +119,32 @@ Shell commands executed via `/bin/sh -c` in `work_dir` with `DOCKER_WORKS_APP=<n
 - `pre_deploy`: Runs before `pull` and `up`.
 - `post_deploy`: Runs only after containers pass the health check.
 - `on_rollback`: Runs when a deployment fails health checks and triggers a rollback.
+
+#### `apps[].templates` *(Go `text/template` Rendering)*
+
+Renders Go `text/template` files (`.tmpl`, `.tpl`, `.gotmpl`) into `work_dir` before `pre_deploy` and container startup (and re-renders on rollback). Uses `missingkey=error` so missing variables fail fast. Built-in helpers: `default`, `join`, `upper`, `lower`, `trim`, `env`.
+
+```yaml
+apps:
+  - name: "prometheus"
+    templates:
+      vars_files:
+        - "vars.yaml"                  # Relative to work_dir (or absolute host path)
+      vars:
+        env_name: "prod"               # Inline vars override vars_files
+      files:
+        - source: "prometheus.yml.tmpl"
+          target: "prometheus.yml"     # Optional (auto-strips .tmpl/.tpl/.gotmpl)
+```
+
+Example `prometheus.yml.tmpl`:
+
+```yaml
+scrape_configs:
+  - job_name: "Ericsson DCN"
+    static_configs:
+      - targets:
+        {{- range .ericsson_dcn }}
+        - {{ .hostname }}
+        {{- end }}
+```

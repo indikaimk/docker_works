@@ -331,6 +331,10 @@ func (s *Service) Rollback(ctx context.Context, app *config.AppConfig, composeCm
 	}
 	s.logger.Warn("Executing compose rollback for app", "app", app.Name, "work_dir", app.WorkDir)
 
+	if err := s.renderTemplates(app); err != nil {
+		return fmt.Errorf("failed to render templates during rollback: %w", err)
+	}
+
 	// 1. Run on_rollback hook if configured
 	if app.Hooks.OnRollback != "" {
 		if err := s.RunHook(ctx, app.Hooks.OnRollback, app.WorkDir, app.Name); err != nil {
@@ -364,6 +368,11 @@ func (s *Service) Deploy(ctx context.Context, app *config.AppConfig, composeCmd 
 	// Ensure work directory exists
 	if err := os.MkdirAll(app.WorkDir, 0755); err != nil {
 		return fmt.Errorf("failed to create app workdir %s: %w", app.WorkDir, err)
+	}
+
+	// Render Go templates (if configured) before pre-deploy hook and compose up
+	if err := s.renderTemplates(app); err != nil {
+		return err
 	}
 
 	// 1. Pre-deploy hook

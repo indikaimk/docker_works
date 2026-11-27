@@ -54,21 +54,22 @@ func (d *DefaultsConfig) IsAutoRollbackEnabled() bool {
 }
 
 type AppConfig struct {
-	Name               string          `yaml:"name"`
-	Enabled            *bool           `yaml:"enabled"`
-	Mode               string          `yaml:"mode"`
-	WorkDir            string          `yaml:"work_dir"`
-	ComposeFiles       []string        `yaml:"compose_files"`
-	EnvFiles           []string        `yaml:"env_files"`
-	Quadlet            *QuadletConfig  `yaml:"quadlet"`
-	Git                *GitConfig      `yaml:"git"`
-	Registry           *RegistryConfig `yaml:"registry"`
-	OCI                *OCIConfig      `yaml:"oci"`
-	Webhook            *WebhookConfig  `yaml:"webhook"`
-	Hooks              HooksConfig     `yaml:"hooks"`
-	AutoPrune          bool            `yaml:"auto_prune"`
-	HealthCheckTimeout time.Duration   `yaml:"health_check_timeout"`
-	AutoRollback       *bool           `yaml:"auto_rollback"`
+	Name               string           `yaml:"name"`
+	Enabled            *bool            `yaml:"enabled"`
+	Mode               string           `yaml:"mode"`
+	WorkDir            string           `yaml:"work_dir"`
+	ComposeFiles       []string         `yaml:"compose_files"`
+	EnvFiles           []string         `yaml:"env_files"`
+	Quadlet            *QuadletConfig   `yaml:"quadlet"`
+	Templates          *TemplatesConfig `yaml:"templates"`
+	Git                *GitConfig       `yaml:"git"`
+	Registry           *RegistryConfig  `yaml:"registry"`
+	OCI                *OCIConfig       `yaml:"oci"`
+	Webhook            *WebhookConfig   `yaml:"webhook"`
+	Hooks              HooksConfig      `yaml:"hooks"`
+	AutoPrune          bool             `yaml:"auto_prune"`
+	HealthCheckTimeout time.Duration    `yaml:"health_check_timeout"`
+	AutoRollback       *bool            `yaml:"auto_rollback"`
 }
 
 type QuadletConfig struct {
@@ -125,6 +126,17 @@ type OCIConfig struct {
 	Artifact     string                  `yaml:"artifact"`
 	PollInterval time.Duration           `yaml:"poll_interval"`
 	Auth         map[string]RegistryAuth `yaml:"auth"`
+}
+
+type TemplatesConfig struct {
+	VarsFiles []string           `yaml:"vars_files"`
+	Vars      map[string]any     `yaml:"vars"`
+	Files     []TemplateFileSpec `yaml:"files"`
+}
+
+type TemplateFileSpec struct {
+	Source string `yaml:"source"`
+	Target string `yaml:"target"`
 }
 
 type RegistryAuth struct {
@@ -283,6 +295,17 @@ func (c *Config) applyDefaults(configDir string) {
 				app.OCI.PollInterval = c.Defaults.RegistryPollInterval
 			}
 		}
+
+		if app.Templates != nil {
+			for j := range app.Templates.Files {
+				tf := &app.Templates.Files[j]
+				tf.Source = strings.TrimSpace(tf.Source)
+				tf.Target = strings.TrimSpace(tf.Target)
+				if tf.Target == "" && tf.Source != "" {
+					tf.Target = defaultTemplateTarget(tf.Source)
+				}
+			}
+		}
 	}
 }
 
@@ -327,6 +350,28 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("app %s has oci config but artifact is empty", app.Name)
 		}
 
+		if app.Templates != nil {
+			for j, vf := range app.Templates.VarsFiles {
+				if strings.TrimSpace(vf) == "" || strings.Contains(vf, "..") {
+					return fmt.Errorf("app %s templates.vars_files[%d] %q is invalid", app.Name, j, vf)
+				}
+			}
+			for j, tf := range app.Templates.Files {
+				if tf.Source == "" {
+					return fmt.Errorf("app %s templates.files[%d].source must not be empty", app.Name, j)
+				}
+				if filepath.IsAbs(tf.Source) || strings.Contains(tf.Source, "..") {
+					return fmt.Errorf("app %s templates.files[%d].source %q must be a relative path without '..'", app.Name, j, tf.Source)
+				}
+				if tf.Target == "" || tf.Target == tf.Source {
+					return fmt.Errorf("app %s templates.files[%d].target must be specified when source %q does not end in .tmpl, .tpl, or .gotmpl", app.Name, j, tf.Source)
+				}
+				if filepath.IsAbs(tf.Target) || strings.Contains(tf.Target, "..") {
+					return fmt.Errorf("app %s templates.files[%d].target %q must be a relative path without '..'", app.Name, j, tf.Target)
+				}
+			}
+		}
+
 		if app.Git != nil {
 			if strings.TrimSpace(app.Git.Repo) == "" {
 				return fmt.Errorf("app %s has git config but repo is empty", app.Name)
@@ -368,4 +413,13 @@ func defaultUserSystemdDir() string {
 		return filepath.Join(home, ".config", "systemd", "user")
 	}
 	return "/etc/systemd/system"
+}
+
+func defaultTemplateTarget(source string) string {
+	for _, ext := range []string{".tmpl", ".tpl", ".gotmpl"} {
+		if strings.HasSuffix(source, ext) {
+			return strings.TrimSuffix(source, ext)
+		}
+	}
+	return ""
 }
