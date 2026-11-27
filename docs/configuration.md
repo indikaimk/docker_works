@@ -122,20 +122,12 @@ Shell commands executed via `/bin/sh -c` in `work_dir` with `DOCKER_WORKS_APP=<n
 
 #### `apps[].sops` *(Encrypted Secrets in Git / OCI)*
 
-Decrypts [SOPS](https://github.com/getsops/sops)-encrypted files (`.env`, `.yaml`, `.json`) into `work_dir` with `0600` permissions before `pre_deploy` and container startup (and re-decrypts the previous commit/digest's secrets automatically on rollback). Requires the `sops` CLI on `PATH`.
+Decrypts [SOPS](https://github.com/getsops/sops)-encrypted files into `work_dir` with `0600` permissions before `pre_deploy` and container startup (and re-decrypts on rollback). Requires the `sops` CLI on `PATH`. See [Secrets Management](secrets.md) for full `age` and AWS KMS workflows.
 
-```yaml
-apps:
-  - name: "my-app"
-    env_files:
-      - "secrets.env" # Or use EnvironmentFile=./secrets.env in Quadlets
-    sops:
-      # Option A: Single age private key (e.g. from AWS Secrets Manager / /etc/docker-works/env)
-      age_key: "${SOPS_AGE_KEY}"
-      # age_key_file: "/etc/docker-works/keys/age.key"
-      # Option B: Omit age_key/age_key_file to use AWS KMS via instance IAM role
-      files:
-        - source: "secrets.enc.env" # Encrypted file in Git/OCI
-          target: "secrets.env"     # Optional (auto-strips .enc. -> secrets.env)
-          output_type: "dotenv"     # Optional: dotenv, yaml, json, binary
-```
+| Field | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `age_key` | `string` | `""` | Inline/env-expanded `age` private key (`SOPS_AGE_KEY`), e.g. `"${SOPS_AGE_KEY}"`. |
+| `age_key_file` | `string` | `""` | Path to an `age` key file (`SOPS_AGE_KEY_FILE`). |
+| `files[].source` | `string` | *(required)* | Encrypted file path relative to `work_dir` (e.g. `secrets.enc.env`). |
+| `files[].target` | `string` | *(auto-derived)* | Decrypted output path relative to `work_dir` (strips `.enc.` / `.enc`, or defaults to `.env`). |
+| `files[].output_type` | `string` | `""` | Optional SOPS `--output-type`: `dotenv`, `yaml`, `json`, or `binary`. |

@@ -12,7 +12,7 @@ A lightweight, zero-dependency GitOps and auto-update daemon for **Docker Compos
 - **GitOps Mode**: Polls Git repositories (`git ls-remote`) and deploys updates from branches or monorepo subdirectories.
 - **Registry Watcher**: Checks remote image manifest digests (`HEAD`/`GET`) without pulling layers and redeploys on digest changes.
 - **Automated Rollback & Health Checks**: Monitors container / systemd unit health post-deploy and rolls back automatically on failure.
-- **Webhooks & Lifecycle Hooks**: Built-in `/healthz` and `/webhooks/{app}` endpoints (GitHub HMAC-SHA256, GitLab token, Bearer auth) plus `pre_deploy`, `post_deploy`, and `on_rollback` hooks.
+- **Webhooks, Metrics & Hooks**: Built-in `/healthz`, `/metrics`, and `/webhooks/{app}` endpoints plus `pre_deploy`, `post_deploy`, `on_rollback` hooks and **SOPS** encrypted secrets decryption.
 - **Auto Prune**: Cleans up unused images (`docker image prune -f` / `podman image prune -f`) after healthy deployments.
 
 ---
@@ -40,6 +40,7 @@ sudo systemctl enable --now docker-works
 
 - [Getting Started](https://indikaimk.github.io/docker_works/getting-started/) — Installer options, `.deb`/`.rpm` packages, and binary downloads
 - [Configuration Reference](https://indikaimk.github.io/docker_works/configuration/) — Full `config.yaml` schema and examples
+- [Secrets Management (SOPS)](https://indikaimk.github.io/docker_works/secrets/) — Encrypted `.env` and config files with `age` or AWS KMS
 - [Podman Guide](https://indikaimk.github.io/docker_works/podman/) — Rootful, rootless, and Podman Quadlet setup
 - [CLI Reference](https://indikaimk.github.io/docker_works/cli/) — `daemon`, `sync`, `doctor`, `validate`, and `version`
 - [Webhooks & Health](https://indikaimk.github.io/docker_works/webhooks/) — Webhook authentication and endpoints
