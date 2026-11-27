@@ -26,9 +26,10 @@
 - **Webhook & Health Endpoints**:
   - Built-in HTTP server with `/healthz` and `/webhooks/{app}`.
   - Supports GitHub HMAC-SHA256 (`X-Hub-Signature-256`), GitLab (`X-Gitlab-Token`), Bearer tokens, and `?secret=` query parameters.
-- **Lifecycle Hooks, SOPS Secrets & Auto Prune**:
+- **Lifecycle Hooks, SOPS Secrets, Templates & Auto Prune**:
   - Shell hooks for `pre_deploy`, `post_deploy`, and `on_rollback` (with `DOCKER_WORKS_APP` set).
   - Native [SOPS](secrets.md) decryption (`age` / AWS KMS) for encrypted `.env` and config files in Git or OCI artifacts.
+  - Built-in Go [Templates](templating.md) (`apps[].templates`) for generating config files from YAML/JSON vars.
   - Optional `auto_prune` runs `docker image prune -f` or `podman image prune -f` after healthy deployments.
 
 ## Architecture

@@ -131,3 +131,32 @@ Decrypts [SOPS](https://github.com/getsops/sops)-encrypted files into `work_dir`
 | `files[].source` | `string` | *(required)* | Encrypted file path relative to `work_dir` (e.g. `secrets.enc.env`). |
 | `files[].target` | `string` | *(auto-derived)* | Decrypted output path relative to `work_dir` (strips `.enc.` / `.enc`, or defaults to `.env`). |
 | `files[].output_type` | `string` | `""` | Optional SOPS `--output-type`: `dotenv`, `yaml`, `json`, or `binary`. |
+
+#### `apps[].templates` *(Go `text/template` Rendering)*
+
+Renders Go `text/template` files (`.tmpl`, `.tpl`, `.gotmpl`) into `work_dir` before `pre_deploy` and container startup (and re-renders on rollback). Uses `missingkey=error` so missing variables fail fast. See [Templates](templating.md) for a Jinja2 conversion guide and built-in functions.
+
+```yaml
+apps:
+  - name: "prometheus"
+    templates:
+      vars_files:
+        - "vars.yaml"                  # Relative to work_dir (or absolute host path)
+      vars:
+        env_name: "prod"               # Inline vars override vars_files
+      files:
+        - source: "prometheus.yml.tmpl"
+          target: "prometheus.yml"     # Optional (auto-strips .tmpl/.tpl/.gotmpl)
+```
+
+Example `prometheus.yml.tmpl`:
+
+```yaml
+scrape_configs:
+  - job_name: "Ericsson DCN"
+    static_configs:
+      - targets:
+        {{- range .ericsson_dcn }}
+        - {{ .hostname }}
+        {{- end }}
+```

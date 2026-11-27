@@ -48,6 +48,7 @@ nav:
   - Configuration: configuration.md
   - Gitless Mode (OCI): gitless.md
   - Secrets Management: secrets.md
+  - Templating: templating.md
   - Podman Guide: podman.md
   - Tutorials:
     - Nginx on Docker Compose: tutorials/nginx-docker.md

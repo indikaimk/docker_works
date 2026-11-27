@@ -334,6 +334,9 @@ func (s *Service) Rollback(ctx context.Context, app *config.AppConfig, composeCm
 	if err := s.decryptSopsFiles(ctx, app); err != nil {
 		return fmt.Errorf("failed to decrypt sops secrets during rollback: %w", err)
 	}
+	if err := s.renderTemplates(app); err != nil {
+		return fmt.Errorf("failed to render templates during rollback: %w", err)
+	}
 
 	// 1. Run on_rollback hook if configured
 	if app.Hooks.OnRollback != "" {
@@ -370,8 +373,11 @@ func (s *Service) Deploy(ctx context.Context, app *config.AppConfig, composeCmd 
 		return fmt.Errorf("failed to create app workdir %s: %w", app.WorkDir, err)
 	}
 
-	// 0. Decrypt SOPS secrets (if configured) before pre-deploy hook and compose up
+	// 0. Decrypt SOPS secrets and render Go templates before pre-deploy hook and compose up
 	if err := s.decryptSopsFiles(ctx, app); err != nil {
+		return err
+	}
+	if err := s.renderTemplates(app); err != nil {
 		return err
 	}
 

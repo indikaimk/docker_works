@@ -42,6 +42,7 @@ sudo systemctl enable --now docker-works
 - [Configuration Reference](https://indikaimk.github.io/docker_works/configuration/) — Full `config.yaml` schema and examples
 - [Gitless Mode (OCI)](https://indikaimk.github.io/docker_works/gitless/) — Deploy Compose/Quadlet bundles from OCI registries without Git
 - [Secrets Management (SOPS)](https://indikaimk.github.io/docker_works/secrets/) — Encrypted `.env` and config files with `age` or AWS KMS
+- [Templates (Go)](https://indikaimk.github.io/docker_works/templating/) — Render config files from YAML/JSON vars with `text/template`
 - [Podman Guide](https://indikaimk.github.io/docker_works/podman/) — Rootful, rootless, and Podman Quadlet setup
 - [Tutorial: Nginx on Docker Compose](https://indikaimk.github.io/docker_works/tutorials/nginx-docker/) — Step-by-step Docker Compose walkthrough
 - [Tutorial: Nginx on Podman Quadlets](https://indikaimk.github.io/docker_works/tutorials/nginx-podman-quadlet/) — Step-by-step rootless Quadlet walkthrough

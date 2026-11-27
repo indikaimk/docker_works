@@ -494,6 +494,9 @@ func (s *Service) deployQuadlet(ctx context.Context, app *config.AppConfig) erro
 	if err := s.decryptSopsFiles(ctx, app); err != nil {
 		return err
 	}
+	if err := s.renderTemplates(app); err != nil {
+		return err
+	}
 
 	if app.Hooks.PreDeploy != "" {
 		if err := s.RunHook(ctx, app.Hooks.PreDeploy, app.WorkDir, app.Name); err != nil {
@@ -527,6 +530,9 @@ func (s *Service) rollbackQuadlet(ctx context.Context, app *config.AppConfig) er
 
 	if err := s.decryptSopsFiles(ctx, app); err != nil {
 		return fmt.Errorf("failed to decrypt sops secrets during quadlet rollback: %w", err)
+	}
+	if err := s.renderTemplates(app); err != nil {
+		return fmt.Errorf("failed to render templates during quadlet rollback: %w", err)
 	}
 
 	if app.Hooks.OnRollback != "" {

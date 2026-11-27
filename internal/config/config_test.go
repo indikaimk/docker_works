@@ -236,6 +236,35 @@ func TestSecurityValidation(t *testing.T) {
 	}
 }
 
+func TestTemplatesConfigDefaultsAndValidation(t *testing.T) {
+	tempDir := t.TempDir()
+	cfgPath := filepath.Join(tempDir, "templates.yaml")
+
+	yamlContent := `
+apps:
+  - name: "prom-app"
+    git:
+      repo: "https://github.com/example/repo.git"
+    templates:
+      vars_files:
+        - "vars.yaml"
+      files:
+        - source: "prometheus.yml.tmpl"
+`
+	if err := os.WriteFile(cfgPath, []byte(yamlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatalf("failed to load templates config: %v", err)
+	}
+
+	if got := cfg.Apps[0].Templates.Files[0].Target; got != "prometheus.yml" {
+		t.Errorf("expected default target prometheus.yml, got %q", got)
+	}
+}
+
 func TestSopsConfigDefaultsAndValidation(t *testing.T) {
 	tempDir := t.TempDir()
 	cfgPath := filepath.Join(tempDir, "sops.yaml")
