@@ -12,6 +12,9 @@
   - Watches Git repositories (GitHub, GitLab, Gitea, etc.) for new commits on target branches.
   - Checks remote heads via `git ls-remote` without cloning on every poll.
   - Supports SSH deploy keys (`ssh_key_path`), HTTPS tokens, username/password auth, and monorepo subdirectories (`path`).
+- **Gitless OCI Artifact Mode**:
+  - Pulls Compose files, Quadlets, and configs directly from OCI registries (`oras` bundles or OCI config images) without Git on the host.
+  - Supports immutable `@sha256:...` digest-pinned rollbacks on healthcheck failure.
 - **Container Registry Watcher**:
   - Monitors image tags (`latest`, semver tags) on Docker Hub, GHCR, AWS ECR, and private registries.
   - Inspects remote manifest digests (SHA256) using lightweight `HEAD`/`GET` requests without pulling image layers.
@@ -23,8 +26,9 @@
 - **Webhook & Health Endpoints**:
   - Built-in HTTP server with `/healthz` and `/webhooks/{app}`.
   - Supports GitHub HMAC-SHA256 (`X-Hub-Signature-256`), GitLab (`X-Gitlab-Token`), Bearer tokens, and `?secret=` query parameters.
-- **Lifecycle Hooks & Auto Prune**:
+- **Lifecycle Hooks, SOPS Secrets & Auto Prune**:
   - Shell hooks for `pre_deploy`, `post_deploy`, and `on_rollback` (with `DOCKER_WORKS_APP` set).
+  - Native [SOPS](secrets.md) decryption (`age` / AWS KMS) for encrypted `.env` and config files in Git or OCI artifacts.
   - Optional `auto_prune` runs `docker image prune -f` or `podman image prune -f` after healthy deployments.
 
 ## Architecture

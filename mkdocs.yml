@@ -46,7 +46,12 @@ nav:
   - Home: index.md
   - Getting Started: getting-started.md
   - Configuration: configuration.md
+  - Gitless Mode (OCI): gitless.md
+  - Secrets Management: secrets.md
   - Podman Guide: podman.md
+  - Tutorials:
+    - Nginx on Docker Compose: tutorials/nginx-docker.md
+    - Nginx on Podman Quadlets: tutorials/nginx-podman-quadlet.md
   - CLI Reference: cli.md
   - Webhooks & Health: webhooks.md
   - Development: development.md

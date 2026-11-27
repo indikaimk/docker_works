@@ -104,7 +104,7 @@ Each app must specify at least one watcher (`git` or `registry`) and a unique `n
 
 #### `apps[].oci` *(Gitless Config Bundles)*
 
-Pulls Compose, Quadlet, and config files directly from an OCI registry (pushed via `oras push` or as an OCI config image) into `work_dir`, enabling a completely gitless workflow with digest-pinned rollbacks.
+Pulls Compose, Quadlet, and config files directly from an OCI registry (pushed via `oras push` or as an OCI config image) into `work_dir`, enabling a completely gitless workflow with digest-pinned rollbacks. See [Gitless Mode (OCI)](gitless.md) for a full walkthrough.
 
 | Field | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
@@ -119,3 +119,15 @@ Shell commands executed via `/bin/sh -c` in `work_dir` with `DOCKER_WORKS_APP=<n
 - `pre_deploy`: Runs before `pull` and `up`.
 - `post_deploy`: Runs only after containers pass the health check.
 - `on_rollback`: Runs when a deployment fails health checks and triggers a rollback.
+
+#### `apps[].sops` *(Encrypted Secrets in Git / OCI)*
+
+Decrypts [SOPS](https://github.com/getsops/sops)-encrypted files into `work_dir` with `0600` permissions before `pre_deploy` and container startup (and re-decrypts on rollback). Requires the `sops` CLI on `PATH`. See [Secrets Management](secrets.md) for full `age` and AWS KMS workflows.
+
+| Field | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `age_key` | `string` | `""` | Inline/env-expanded `age` private key (`SOPS_AGE_KEY`), e.g. `"${SOPS_AGE_KEY}"`. |
+| `age_key_file` | `string` | `""` | Path to an `age` key file (`SOPS_AGE_KEY_FILE`). |
+| `files[].source` | `string` | *(required)* | Encrypted file path relative to `work_dir` (e.g. `secrets.enc.env`). |
+| `files[].target` | `string` | *(auto-derived)* | Decrypted output path relative to `work_dir` (strips `.enc.` / `.enc`, or defaults to `.env`). |
+| `files[].output_type` | `string` | `""` | Optional SOPS `--output-type`: `dotenv`, `yaml`, `json`, or `binary`. |

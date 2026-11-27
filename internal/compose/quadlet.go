@@ -491,6 +491,10 @@ func (s *Service) deployQuadlet(ctx context.Context, app *config.AppConfig) erro
 		return fmt.Errorf("failed to create app workdir %s: %w", app.WorkDir, err)
 	}
 
+	if err := s.decryptSopsFiles(ctx, app); err != nil {
+		return err
+	}
+
 	if app.Hooks.PreDeploy != "" {
 		if err := s.RunHook(ctx, app.Hooks.PreDeploy, app.WorkDir, app.Name); err != nil {
 			return fmt.Errorf("pre-deploy hook failed: %w", err)
@@ -520,6 +524,10 @@ func (s *Service) deployQuadlet(ctx context.Context, app *config.AppConfig) erro
 
 func (s *Service) rollbackQuadlet(ctx context.Context, app *config.AppConfig) error {
 	s.logger.Warn("Executing quadlet rollback for app", "app", app.Name, "work_dir", app.WorkDir)
+
+	if err := s.decryptSopsFiles(ctx, app); err != nil {
+		return fmt.Errorf("failed to decrypt sops secrets during quadlet rollback: %w", err)
+	}
 
 	if app.Hooks.OnRollback != "" {
 		if err := s.RunHook(ctx, app.Hooks.OnRollback, app.WorkDir, app.Name); err != nil {
