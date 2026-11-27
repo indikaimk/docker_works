@@ -40,6 +40,7 @@ sudo systemctl enable --now docker-works
 
 - [Getting Started](https://indikaimk.github.io/docker_works/getting-started/) — Installer options, `.deb`/`.rpm` packages, and binary downloads
 - [Configuration Reference](https://indikaimk.github.io/docker_works/configuration/) — Full `config.yaml` schema and examples
+- [Templates (Go)](https://indikaimk.github.io/docker_works/templating/) — Render config files from YAML/JSON vars with `text/template`
 - [Podman Guide](https://indikaimk.github.io/docker_works/podman/) — Rootful, rootless, and Podman Quadlet setup
 - [CLI Reference](https://indikaimk.github.io/docker_works/cli/) — `daemon`, `sync`, `doctor`, `validate`, and `version`
 - [Webhooks & Health](https://indikaimk.github.io/docker_works/webhooks/) — Webhook authentication and endpoints

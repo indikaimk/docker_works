@@ -122,7 +122,7 @@ Shell commands executed via `/bin/sh -c` in `work_dir` with `DOCKER_WORKS_APP=<n
 
 #### `apps[].templates` *(Go `text/template` Rendering)*
 
-Renders Go `text/template` files (`.tmpl`, `.tpl`, `.gotmpl`) into `work_dir` before `pre_deploy` and container startup (and re-renders on rollback). Uses `missingkey=error` so missing variables fail fast. Built-in helpers: `default`, `join`, `upper`, `lower`, `trim`, `env`.
+Renders Go `text/template` files (`.tmpl`, `.tpl`, `.gotmpl`) into `work_dir` before `pre_deploy` and container startup (and re-renders on rollback). Uses `missingkey=error` so missing variables fail fast. See [Templates](templating.md) for a Jinja2 conversion guide and built-in functions.
 
 ```yaml
 apps:

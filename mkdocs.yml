@@ -46,6 +46,7 @@ nav:
   - Home: index.md
   - Getting Started: getting-started.md
   - Configuration: configuration.md
+  - Templating: templating.md
   - Podman Guide: podman.md
   - CLI Reference: cli.md
   - Webhooks & Health: webhooks.md
