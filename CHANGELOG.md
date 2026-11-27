@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-27
+
+### Added
+- **Self-Config GitOps & Hot Reload (`config_git`)**: Added `config_git` (`repo`, `branch`, `path`, `config_file`, `poll_interval`, `auth`) so `docker-works` can pull and validate its own `config.yaml` from Git, hot-reload the engine in-process on valid changes, reject/skip broken commits while keeping the active config running, and pull the latest remote config during `docker-works sync`.
+- **Multi-File App Configs (`apps_dir`)**: Added `apps_dir` to load `*.yaml`/`*.yml` app definitions (single app or `apps:` list per file) alphabetically.
+
 ## [0.6.0] - 2026-11-27
 
 ### Added
