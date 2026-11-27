@@ -112,10 +112,8 @@ func runDaemon(args []string) {
 	gitSyncer := gitops.NewSyncer(runner, logger)
 	regChecker := registry.NewRemoteChecker(logger)
 
-	eng := engine.NewEngine(cfg, composeSvc, gitSyncer, regChecker, logger)
-
 	logger.Info("Starting DockerWorks daemon", "version", Version)
-	if err := eng.Start(ctx); err != nil {
+	if err := engine.RunWithConfigSync(ctx, cfg, composeSvc, gitSyncer, regChecker, logger); err != nil {
 		logger.Error("Daemon encountered error", "error", err)
 		os.Exit(1)
 	}
@@ -144,6 +142,16 @@ func runSync(args []string) {
 	composeSvc := compose.NewService(runner, logger)
 	gitSyncer := gitops.NewSyncer(runner, logger)
 	regChecker := registry.NewRemoteChecker(logger)
+
+	if cfg.ConfigGit != nil {
+		cs := engine.NewConfigSyncer(cfg, gitSyncer, logger)
+		if syncedCfg, _, changed, err := cs.CheckAndLoad(ctx); err != nil {
+			logger.Warn("Failed to sync config_git during manual sync; using local config", "error", err)
+		} else if changed {
+			cfg = syncedCfg
+		}
+	}
+
 	eng := engine.NewEngine(cfg, composeSvc, gitSyncer, regChecker, logger)
 
 	if *appName != "" {

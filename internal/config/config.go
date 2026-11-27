@@ -16,9 +16,20 @@ import (
 var validAppNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
 
 type Config struct {
-	Server   ServerConfig   `yaml:"server"`
-	Defaults DefaultsConfig `yaml:"defaults"`
-	Apps     []AppConfig    `yaml:"apps"`
+	Server    ServerConfig     `yaml:"server"`
+	Defaults  DefaultsConfig   `yaml:"defaults"`
+	ConfigGit *ConfigGitConfig `yaml:"config_git"`
+	AppsDir   string           `yaml:"apps_dir"`
+	Apps      []AppConfig      `yaml:"apps"`
+}
+
+type ConfigGitConfig struct {
+	Repo         string        `yaml:"repo"`
+	Branch       string        `yaml:"branch"`
+	Path         string        `yaml:"path"`
+	ConfigFile   string        `yaml:"config_file"`
+	PollInterval time.Duration `yaml:"poll_interval"`
+	Auth         GitAuthConfig `yaml:"auth"`
 }
 
 type ServerConfig struct {
@@ -189,12 +200,63 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("failed to parse yaml config: %w", err)
 	}
 
+	if err := cfg.loadAppsDir(filepath.Dir(path)); err != nil {
+		return nil, fmt.Errorf("failed to load apps_dir: %w", err)
+	}
+
 	cfg.applyDefaults(filepath.Dir(path))
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid configuration: %w", err)
 	}
 
 	return cfg, nil
+}
+
+func (c *Config) loadAppsDir(configDir string) error {
+	if strings.TrimSpace(c.AppsDir) == "" {
+		return nil
+	}
+	if strings.Contains(c.AppsDir, "..") {
+		return fmt.Errorf("apps_dir %q must not contain '..'", c.AppsDir)
+	}
+	dir := c.AppsDir
+	if !filepath.IsAbs(dir) {
+		dir = filepath.Join(configDir, dir)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return fmt.Errorf("failed to read apps_dir %s: %w", dir, err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		ext := strings.ToLower(filepath.Ext(entry.Name()))
+		if ext != ".yaml" && ext != ".yml" {
+			continue
+		}
+		filePath := filepath.Join(dir, entry.Name())
+		raw, err := os.ReadFile(filePath)
+		if err != nil {
+			return fmt.Errorf("failed to read app config %s: %w", filePath, err)
+		}
+		expanded := os.ExpandEnv(string(raw))
+
+		var wrapper struct {
+			Apps []AppConfig `yaml:"apps"`
+		}
+		if err := yaml.Unmarshal([]byte(expanded), &wrapper); err == nil && len(wrapper.Apps) > 0 {
+			c.Apps = append(c.Apps, wrapper.Apps...)
+			continue
+		}
+
+		var single AppConfig
+		if err := yaml.Unmarshal([]byte(expanded), &single); err != nil {
+			return fmt.Errorf("failed to parse app config %s: %w", filePath, err)
+		}
+		c.Apps = append(c.Apps, single)
+	}
+	return nil
 }
 
 func (c *Config) applyDefaults(configDir string) {
@@ -229,6 +291,23 @@ func (c *Config) applyDefaults(configDir string) {
 	if c.Defaults.AutoRollback == nil {
 		defaultRollback := true
 		c.Defaults.AutoRollback = &defaultRollback
+	}
+
+	if c.ConfigGit != nil {
+		if c.ConfigGit.Branch == "" {
+			c.ConfigGit.Branch = "main"
+		}
+		if c.ConfigGit.Path == "" {
+			c.ConfigGit.Path = "."
+		} else {
+			c.ConfigGit.Path = filepath.Clean(c.ConfigGit.Path)
+		}
+		if c.ConfigGit.ConfigFile == "" {
+			c.ConfigGit.ConfigFile = "config.yaml"
+		}
+		if c.ConfigGit.PollInterval <= 0 {
+			c.ConfigGit.PollInterval = c.Defaults.GitPollInterval
+		}
 	}
 
 	for i := range c.Apps {
@@ -337,6 +416,24 @@ func (c *Config) applyDefaults(configDir string) {
 func (c *Config) Validate() error {
 	if c.Defaults.Runtime != RuntimeDocker && c.Defaults.Runtime != RuntimePodman {
 		return fmt.Errorf("defaults.runtime must be '%s' or '%s', got %q", RuntimeDocker, RuntimePodman, c.Defaults.Runtime)
+	}
+
+	if c.ConfigGit != nil {
+		if strings.TrimSpace(c.ConfigGit.Repo) == "" {
+			return fmt.Errorf("config_git.repo must not be empty")
+		}
+		if strings.HasPrefix(strings.TrimSpace(c.ConfigGit.Repo), "-") {
+			return fmt.Errorf("config_git.repo must not start with '-'")
+		}
+		if strings.HasPrefix(strings.TrimSpace(c.ConfigGit.Branch), "-") {
+			return fmt.Errorf("config_git.branch must not start with '-'")
+		}
+		if filepath.IsAbs(c.ConfigGit.Path) || strings.Contains(c.ConfigGit.Path, "..") {
+			return fmt.Errorf("config_git.path %q must be a relative path without '..'", c.ConfigGit.Path)
+		}
+		if filepath.IsAbs(c.ConfigGit.ConfigFile) || strings.Contains(c.ConfigGit.ConfigFile, "..") {
+			return fmt.Errorf("config_git.config_file %q must be a relative path without '..'", c.ConfigGit.ConfigFile)
+		}
 	}
 
 	names := make(map[string]struct{})
