@@ -119,3 +119,23 @@ Shell commands executed via `/bin/sh -c` in `work_dir` with `DOCKER_WORKS_APP=<n
 - `pre_deploy`: Runs before `pull` and `up`.
 - `post_deploy`: Runs only after containers pass the health check.
 - `on_rollback`: Runs when a deployment fails health checks and triggers a rollback.
+
+#### `apps[].sops` *(Encrypted Secrets in Git / OCI)*
+
+Decrypts [SOPS](https://github.com/getsops/sops)-encrypted files (`.env`, `.yaml`, `.json`) into `work_dir` with `0600` permissions before `pre_deploy` and container startup (and re-decrypts the previous commit/digest's secrets automatically on rollback). Requires the `sops` CLI on `PATH`.
+
+```yaml
+apps:
+  - name: "my-app"
+    env_files:
+      - "secrets.env" # Or use EnvironmentFile=./secrets.env in Quadlets
+    sops:
+      # Option A: Single age private key (e.g. from AWS Secrets Manager / /etc/docker-works/env)
+      age_key: "${SOPS_AGE_KEY}"
+      # age_key_file: "/etc/docker-works/keys/age.key"
+      # Option B: Omit age_key/age_key_file to use AWS KMS via instance IAM role
+      files:
+        - source: "secrets.enc.env" # Encrypted file in Git/OCI
+          target: "secrets.env"     # Optional (auto-strips .enc. -> secrets.env)
+          output_type: "dotenv"     # Optional: dotenv, yaml, json, binary
+```
