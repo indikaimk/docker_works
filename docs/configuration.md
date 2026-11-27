@@ -104,7 +104,7 @@ Each app must specify at least one watcher (`git` or `registry`) and a unique `n
 
 #### `apps[].oci` *(Gitless Config Bundles)*
 
-Pulls Compose, Quadlet, and config files directly from an OCI registry (pushed via `oras push` or as an OCI config image) into `work_dir`, enabling a completely gitless workflow with digest-pinned rollbacks.
+Pulls Compose, Quadlet, and config files directly from an OCI registry (pushed via `oras push` or as an OCI config image) into `work_dir`, enabling a completely gitless workflow with digest-pinned rollbacks. See [Gitless Mode (OCI)](gitless.md) for a full walkthrough.
 
 | Field | Type | Default | Description |
 | :--- | :--- | :--- | :--- |

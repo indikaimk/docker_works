@@ -12,6 +12,9 @@
   - Watches Git repositories (GitHub, GitLab, Gitea, etc.) for new commits on target branches.
   - Checks remote heads via `git ls-remote` without cloning on every poll.
   - Supports SSH deploy keys (`ssh_key_path`), HTTPS tokens, username/password auth, and monorepo subdirectories (`path`).
+- **Gitless OCI Artifact Mode**:
+  - Pulls Compose files, Quadlets, and configs directly from OCI registries (`oras` bundles or OCI config images) without Git on the host.
+  - Supports immutable `@sha256:...` digest-pinned rollbacks on healthcheck failure.
 - **Container Registry Watcher**:
   - Monitors image tags (`latest`, semver tags) on Docker Hub, GHCR, AWS ECR, and private registries.
   - Inspects remote manifest digests (SHA256) using lightweight `HEAD`/`GET` requests without pulling image layers.

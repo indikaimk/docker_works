@@ -9,7 +9,7 @@ A lightweight, zero-dependency GitOps and auto-update daemon for **Docker Compos
 ## ✨ Features
 
 - **Docker & Podman Support**: Invokes `docker compose` or `podman compose` directly (`defaults.runtime`), plus native **Podman Quadlet** (`mode: quadlet`) support.
-- **GitOps Mode**: Polls Git repositories (`git ls-remote`) and deploys updates from branches or monorepo subdirectories.
+- **GitOps & Gitless OCI Mode**: Polls Git repositories (`git ls-remote`) or pulls Compose/Quadlet bundles directly from OCI registries (`apps[].oci`) with digest-pinned rollbacks.
 - **Registry Watcher**: Checks remote image manifest digests (`HEAD`/`GET`) without pulling layers and redeploys on digest changes.
 - **Automated Rollback & Health Checks**: Monitors container / systemd unit health post-deploy and rolls back automatically on failure.
 - **Webhooks, Metrics & Hooks**: Built-in `/healthz`, `/metrics`, and `/webhooks/{app}` endpoints plus `pre_deploy`, `post_deploy`, `on_rollback` hooks and **SOPS** encrypted secrets decryption.
@@ -40,6 +40,7 @@ sudo systemctl enable --now docker-works
 
 - [Getting Started](https://indikaimk.github.io/docker_works/getting-started/) — Installer options, `.deb`/`.rpm` packages, and binary downloads
 - [Configuration Reference](https://indikaimk.github.io/docker_works/configuration/) — Full `config.yaml` schema and examples
+- [Gitless Mode (OCI)](https://indikaimk.github.io/docker_works/gitless/) — Deploy Compose/Quadlet bundles from OCI registries without Git
 - [Secrets Management (SOPS)](https://indikaimk.github.io/docker_works/secrets/) — Encrypted `.env` and config files with `age` or AWS KMS
 - [Podman Guide](https://indikaimk.github.io/docker_works/podman/) — Rootful, rootless, and Podman Quadlet setup
 - [CLI Reference](https://indikaimk.github.io/docker_works/cli/) — `daemon`, `sync`, `doctor`, `validate`, and `version`
