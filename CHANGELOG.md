@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-27
+
+### Added
+- **SOPS Encrypted Secrets (`apps[].sops`)**: Decrypts SOPS-encrypted `.env`, `.yaml`, `.json`, and binary files into `work_dir` with `0600` permissions before `pre_deploy` and container startup (supporting `age_key`, `age_key_file`, and AWS KMS IAM roles), with automatic re-decryption on rollback and `sops` CLI checks in `docker-works doctor`.
+- **Go `text/template` Rendering (`apps[].templates`)**: Renders `.tmpl`, `.tpl`, and `.gotmpl` configuration templates from YAML/JSON `vars_files` and inline `vars` with `missingkey=error` fail-fast validation and built-in helpers (`default`, `join`, `upper`, `lower`, `trim`, `env`) for both Compose and Quadlet modes.
+- **Documentation & Tutorials**: Added [Secrets Management (SOPS)](docs/secrets.md), [Gitless Mode (OCI)](docs/gitless.md), [Templates (Go)](docs/templating.md), and step-by-step Nginx tutorials for [Docker Compose](docs/tutorials/nginx-docker.md) and [Podman Quadlets](docs/tutorials/nginx-podman-quadlet.md).
+
 ## [0.5.0] - 2026-11-26
 
 ### Added
