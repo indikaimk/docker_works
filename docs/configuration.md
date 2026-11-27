@@ -67,7 +67,7 @@ apps:
 
 ### `config_git` *(Self-Config GitOps & Hot Reload)*
 
-Allows `docker-works` to pull its own `config.yaml` (and `apps_dir`) from a Git repository and hot-reload watchers automatically when valid commits are pushed. Invalid commits are rejected and skipped while keeping the active configuration running.
+Allows `docker-works` to pull its own `config.yaml` (and `apps_dir`) from a Git repository and hot-reload watchers automatically when valid commits are pushed (also pulled on `docker-works sync`). Invalid commits are rejected and skipped while keeping the active configuration running.
 
 ```yaml
 # Minimal bootstrap /etc/docker-works/config.yaml on the host

@@ -21,7 +21,7 @@ docker-works daemon --config /etc/docker-works/config.yaml --log-level info
 
 ### `sync`
 
-Triggers an immediate synchronous deployment for one or all enabled apps and exits.
+Triggers an immediate synchronous deployment for one or all enabled apps and exits. When `config_git` is configured, `sync` first pulls and validates the latest remote configuration before syncing apps.
 
 ```bash
 # Sync a single app
